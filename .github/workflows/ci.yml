@@ -41,6 +41,11 @@ jobs:
           ./zig-out/bin/simple_contract
           ./zig-out/bin/gas_inspector_example
           ./zig-out/bin/precompile_example
+          ./zig-out/bin/contract_deployment
+          ./zig-out/bin/uniswap_reserves
+          ./zig-out/bin/custom_opcodes
+          ./zig-out/bin/database_components
+          ./zig-out/bin/cheatcode_inspector
 
       - name: Run benchmarks
         run: ./zig-out/bin/zevm-bench

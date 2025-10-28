@@ -7,6 +7,7 @@ const ContextError = @import("context.zig").ContextError;
 
 pub const BlockEnv = @import("block.zig").BlockEnv;
 pub const TxEnv = @import("tx.zig").TxEnv;
+pub const TxKind = @import("tx.zig").TxKind;
 pub const CfgEnv = @import("cfg.zig").CfgEnv;
 pub const Journal = @import("journal.zig").Journal;
 pub const LocalContext = @import("local.zig").LocalContext;

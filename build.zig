@@ -252,4 +252,114 @@ pub fn build(b: *std.Build) void {
     precompile_exe.root_module.addImport("handler", handler_module);
     precompile_exe.root_module.addImport("inspector", inspector_module);
     b.installArtifact(precompile_exe);
+
+    // Contract deployment example
+    const contract_deployment_exe = b.addExecutable(.{
+        .name = "contract_deployment",
+        .root_module = b.addModule("contract_deployment", .{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "examples/contract_deployment.zig" } },
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    contract_deployment_exe.linkSystemLibrary("c");
+    contract_deployment_exe.linkSystemLibrary("m");
+    contract_deployment_exe.root_module.addImport("primitives", primitives_module);
+    contract_deployment_exe.root_module.addImport("bytecode", bytecode_module);
+    contract_deployment_exe.root_module.addImport("state", state_module);
+    contract_deployment_exe.root_module.addImport("database", database_module);
+    contract_deployment_exe.root_module.addImport("context", context_module);
+    contract_deployment_exe.root_module.addImport("interpreter", interpreter_module);
+    contract_deployment_exe.root_module.addImport("precompile", precompile_module);
+    contract_deployment_exe.root_module.addImport("handler", handler_module);
+    contract_deployment_exe.root_module.addImport("inspector", inspector_module);
+    b.installArtifact(contract_deployment_exe);
+
+    // Uniswap reserves example
+    const uniswap_reserves_exe = b.addExecutable(.{
+        .name = "uniswap_reserves",
+        .root_module = b.addModule("uniswap_reserves", .{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "examples/uniswap_reserves.zig" } },
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    uniswap_reserves_exe.linkSystemLibrary("c");
+    uniswap_reserves_exe.linkSystemLibrary("m");
+    uniswap_reserves_exe.root_module.addImport("primitives", primitives_module);
+    uniswap_reserves_exe.root_module.addImport("bytecode", bytecode_module);
+    uniswap_reserves_exe.root_module.addImport("state", state_module);
+    uniswap_reserves_exe.root_module.addImport("database", database_module);
+    uniswap_reserves_exe.root_module.addImport("context", context_module);
+    uniswap_reserves_exe.root_module.addImport("interpreter", interpreter_module);
+    uniswap_reserves_exe.root_module.addImport("precompile", precompile_module);
+    uniswap_reserves_exe.root_module.addImport("handler", handler_module);
+    uniswap_reserves_exe.root_module.addImport("inspector", inspector_module);
+    b.installArtifact(uniswap_reserves_exe);
+
+    // Custom opcodes example
+    const custom_opcodes_exe = b.addExecutable(.{
+        .name = "custom_opcodes",
+        .root_module = b.addModule("custom_opcodes", .{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "examples/custom_opcodes.zig" } },
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    custom_opcodes_exe.linkSystemLibrary("c");
+    custom_opcodes_exe.linkSystemLibrary("m");
+    custom_opcodes_exe.root_module.addImport("primitives", primitives_module);
+    custom_opcodes_exe.root_module.addImport("bytecode", bytecode_module);
+    custom_opcodes_exe.root_module.addImport("state", state_module);
+    custom_opcodes_exe.root_module.addImport("database", database_module);
+    custom_opcodes_exe.root_module.addImport("context", context_module);
+    custom_opcodes_exe.root_module.addImport("interpreter", interpreter_module);
+    custom_opcodes_exe.root_module.addImport("precompile", precompile_module);
+    custom_opcodes_exe.root_module.addImport("handler", handler_module);
+    custom_opcodes_exe.root_module.addImport("inspector", inspector_module);
+    b.installArtifact(custom_opcodes_exe);
+
+    // Database components example
+    const database_components_exe = b.addExecutable(.{
+        .name = "database_components",
+        .root_module = b.addModule("database_components", .{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "examples/database_components.zig" } },
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    database_components_exe.linkSystemLibrary("c");
+    database_components_exe.linkSystemLibrary("m");
+    database_components_exe.root_module.addImport("primitives", primitives_module);
+    database_components_exe.root_module.addImport("bytecode", bytecode_module);
+    database_components_exe.root_module.addImport("state", state_module);
+    database_components_exe.root_module.addImport("database", database_module);
+    database_components_exe.root_module.addImport("context", context_module);
+    database_components_exe.root_module.addImport("interpreter", interpreter_module);
+    database_components_exe.root_module.addImport("precompile", precompile_module);
+    database_components_exe.root_module.addImport("handler", handler_module);
+    database_components_exe.root_module.addImport("inspector", inspector_module);
+    b.installArtifact(database_components_exe);
+
+    // Cheatcode inspector example
+    const cheatcode_inspector_exe = b.addExecutable(.{
+        .name = "cheatcode_inspector",
+        .root_module = b.addModule("cheatcode_inspector", .{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "examples/cheatcode_inspector.zig" } },
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    cheatcode_inspector_exe.linkSystemLibrary("c");
+    cheatcode_inspector_exe.linkSystemLibrary("m");
+    cheatcode_inspector_exe.root_module.addImport("primitives", primitives_module);
+    cheatcode_inspector_exe.root_module.addImport("bytecode", bytecode_module);
+    cheatcode_inspector_exe.root_module.addImport("state", state_module);
+    cheatcode_inspector_exe.root_module.addImport("database", database_module);
+    cheatcode_inspector_exe.root_module.addImport("context", context_module);
+    cheatcode_inspector_exe.root_module.addImport("interpreter", interpreter_module);
+    cheatcode_inspector_exe.root_module.addImport("precompile", precompile_module);
+    cheatcode_inspector_exe.root_module.addImport("handler", handler_module);
+    cheatcode_inspector_exe.root_module.addImport("inspector", inspector_module);
+    b.installArtifact(cheatcode_inspector_exe);
 }
