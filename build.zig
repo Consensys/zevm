@@ -121,6 +121,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    test_exe.linkSystemLibrary("c");
+    test_exe.linkSystemLibrary("m");
     test_exe.root_module.addImport("primitives", primitives_module);
     test_exe.root_module.addImport("bytecode", bytecode_module);
     test_exe.root_module.addImport("state", state_module);
@@ -143,6 +145,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    bench_exe.linkSystemLibrary("c");
+    bench_exe.linkSystemLibrary("m");
     bench_exe.root_module.addImport("primitives", primitives_module);
     bench_exe.root_module.addImport("bytecode", bytecode_module);
     bench_exe.root_module.addImport("state", state_module);
@@ -170,6 +174,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    example_exe.linkSystemLibrary("c");
+    example_exe.linkSystemLibrary("m");
     example_exe.root_module.addImport("zevm", lib.root_module);
     example_exe.root_module.addImport("primitives", primitives_module);
     example_exe.root_module.addImport("bytecode", bytecode_module);
@@ -192,6 +198,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    simple_contract_exe.linkSystemLibrary("c");
+    simple_contract_exe.linkSystemLibrary("m");
     simple_contract_exe.root_module.addImport("primitives", primitives_module);
     simple_contract_exe.root_module.addImport("bytecode", bytecode_module);
     simple_contract_exe.root_module.addImport("state", state_module);
@@ -211,6 +219,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    gas_inspector_exe.linkSystemLibrary("c");
+    gas_inspector_exe.linkSystemLibrary("m");
     gas_inspector_exe.root_module.addImport("primitives", primitives_module);
     gas_inspector_exe.root_module.addImport("bytecode", bytecode_module);
     gas_inspector_exe.root_module.addImport("state", state_module);
@@ -230,6 +240,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    precompile_exe.linkSystemLibrary("c");
+    precompile_exe.linkSystemLibrary("m");
     precompile_exe.root_module.addImport("primitives", primitives_module);
     precompile_exe.root_module.addImport("bytecode", bytecode_module);
     precompile_exe.root_module.addImport("state", state_module);
