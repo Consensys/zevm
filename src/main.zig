@@ -11,6 +11,9 @@ pub const precompile = @import("precompile");
 pub const handler = @import("handler");
 pub const inspector = @import("inspector");
 
+// Version information
+pub const version = @import("version.zig");
+
 // Re-export commonly used types
 pub const Address = primitives.Address;
 pub const Hash = primitives.Hash;

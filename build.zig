@@ -133,6 +133,28 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(test_exe);
 
+    // Benchmark executable
+    const bench_exe = b.addExecutable(.{
+        .name = "zevm-bench",
+        .root_module = b.addModule("zevm-bench", .{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "examples/benchmark.zig" } },
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    bench_exe.root_module.addImport("primitives", primitives_module);
+    bench_exe.root_module.addImport("bytecode", bytecode_module);
+    bench_exe.root_module.addImport("state", state_module);
+    bench_exe.root_module.addImport("database", database_module);
+    bench_exe.root_module.addImport("context", context_module);
+    bench_exe.root_module.addImport("interpreter", interpreter_module);
+    bench_exe.root_module.addImport("precompile", precompile_module);
+    bench_exe.root_module.addImport("handler", handler_module);
+    bench_exe.root_module.addImport("inspector", inspector_module);
+
+    b.installArtifact(bench_exe);
+
     // Run tests
     const run_tests = b.addRunArtifact(test_exe);
     const test_step = b.step("test", "Run unit tests");
@@ -160,28 +182,6 @@ pub fn build(b: *std.Build) void {
     example_exe.root_module.addImport("inspector", inspector_module);
 
     b.installArtifact(example_exe);
-
-    // Benchmark executable
-    const bench_exe = b.addExecutable(.{
-        .name = "zevm-bench",
-        .root_module = b.addModule("zevm-bench", .{
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "benchmarks/main.zig" } },
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-
-    bench_exe.root_module.addImport("primitives", primitives_module);
-    bench_exe.root_module.addImport("bytecode", bytecode_module);
-    bench_exe.root_module.addImport("state", state_module);
-    bench_exe.root_module.addImport("database", database_module);
-    bench_exe.root_module.addImport("context", context_module);
-    bench_exe.root_module.addImport("interpreter", interpreter_module);
-    bench_exe.root_module.addImport("precompile", precompile_module);
-    bench_exe.root_module.addImport("handler", handler_module);
-    bench_exe.root_module.addImport("inspector", inspector_module);
-
-    b.installArtifact(bench_exe);
 
     // Example executables
     const simple_contract_exe = b.addExecutable(.{
