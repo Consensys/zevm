@@ -77,7 +77,9 @@ pub fn main() !void {
     defer tx.deinit();
 
     tx.kind = context.TxKind.Create;
-    tx.data = bytecode_data;
+    // Use c_allocator to match what TxEnv.deinit() expects
+    tx.data = std.ArrayList(u8).initCapacity(std.heap.c_allocator, bytecode_data.items.len) catch return;
+    try tx.data.?.appendSlice(std.heap.c_allocator, bytecode_data.items);
     tx.gas_limit = 1000000;
     tx.caller = [_]u8{0x01} ** 20; // Non-zero caller
 
