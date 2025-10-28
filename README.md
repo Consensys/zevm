@@ -5,8 +5,6 @@
 [![Version](https://img.shields.io/badge/Version-0.1.0-orange.svg)](RELEASE_NOTES.md)
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)](https://github.com/your-username/zevm/actions)
 [![Tests](https://img.shields.io/badge/Tests-100%25%20Passing-brightgreen.svg)](https://github.com/your-username/zevm/actions)
-[![EVM](https://img.shields.io/badge/EVM-Prague%20Hardfork-purple.svg)](https://ethereum.org/)
-[![Performance](https://img.shields.io/badge/Performance-High%20Speed-red.svg)](#performance)
 
 A high-performance Ethereum Virtual Machine implementation in Zig, ported from the Rust [revm](https://github.com/bluealloy/revm) project.
 
