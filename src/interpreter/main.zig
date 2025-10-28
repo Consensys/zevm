@@ -1,0 +1,86 @@
+const std = @import("std");
+const primitives = @import("primitives");
+const bytecode = @import("bytecode");
+const context = @import("context");
+pub const InputsImpl = @import("interpreter.zig").InputsImpl;
+pub const Interpreter = @import("interpreter.zig").Interpreter;
+pub const ExtBytecode = @import("interpreter.zig").ExtBytecode;
+
+// Re-export commonly used types
+pub const U256 = primitives.U256;
+pub const U128 = primitives.U128;
+pub const U64 = primitives.U64;
+pub const U32 = primitives.U32;
+pub const U16 = primitives.U16;
+pub const U8 = primitives.U8;
+pub const Address = primitives.Address;
+pub const Hash = primitives.Hash;
+pub const SpecId = primitives.SpecId;
+pub const Bytes = primitives.Bytes;
+
+// Re-export interpreter components
+pub const Gas = @import("gas.zig").Gas;
+pub const Stack = @import("stack.zig").Stack;
+pub const Memory = @import("memory.zig").Memory;
+pub const InstructionResult = @import("instruction_result.zig").InstructionResult;
+pub const InterpreterAction = @import("interpreter_action.zig").InterpreterAction;
+pub const CallScheme = @import("interpreter_action.zig").CallScheme;
+pub const InstructionContext = @import("instruction_context.zig").InstructionContext;
+
+// Constants
+pub const STACK_LIMIT = 1024;
+
+/// Main interpreter module for EVM bytecode execution
+pub const testing = struct {
+    pub fn testGas() !void {
+        var gas = Gas.new(1000000);
+        std.debug.assert(gas.getLimit() == 1000000);
+        std.debug.assert(gas.getRemaining() == 1000000);
+        std.debug.assert(gas.getSpent() == 0);
+
+        _ = gas.spend(1000);
+        std.debug.assert(gas.getRemaining() == 999000);
+        std.debug.assert(gas.getSpent() == 1000);
+
+        std.debug.print("Gas tests passed.\n", .{});
+    }
+
+    pub fn testStack() !void {
+        var stack = Stack.new();
+        std.debug.assert(stack.len() == 0);
+
+        try stack.push(@as(primitives.U256, 1));
+        std.debug.assert(stack.len() == 1);
+
+        const value = stack.pop() orelse return error.StackEmpty;
+        std.debug.assert(value == @as(primitives.U256, 1));
+
+        std.debug.print("Stack tests passed.\n", .{});
+    }
+
+    pub fn testMemory() !void {
+        var memory = Memory.new();
+        std.debug.assert(memory.size() == 0);
+
+        const data = [_]u8{ 0x01, 0x02, 0x03, 0x04 };
+        try memory.set(0, &data);
+        std.debug.assert(memory.size() >= 4);
+
+        const slice = memory.slice(0, 4);
+        std.debug.assert(std.mem.eql(u8, slice, &data));
+
+        std.debug.print("Memory tests passed.\n", .{});
+    }
+
+    pub fn testInterpreter() !void {
+        const inputs = InputsImpl.new([_]u8{0} ** 20, [_]u8{0} ** 20, @as(primitives.U256, 0), &[_]u8{}, 1000000, CallScheme.call, false, 0);
+
+        var interpreter = Interpreter.new(Memory.new(), ExtBytecode.new(bytecode.Bytecode.new()), inputs, false, primitives.SpecId.prague, 1000000);
+
+        std.debug.assert(interpreter.gas.getLimit() == 1000000);
+        std.debug.assert(interpreter.stack.len() == 0);
+        std.debug.assert(interpreter.memory.size() == 0);
+
+        std.debug.print("Interpreter tests passed.\n", .{});
+    }
+};
