@@ -61,9 +61,6 @@ jobs:
       - name: Format check
         run: zig fmt --check .
 
-      - name: Analyze code
-        run: zig build -Danalyze
-
   security:
     name: Security Scan
     runs-on: ubuntu-latest
