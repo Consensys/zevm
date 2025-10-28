@@ -28,27 +28,22 @@ jobs:
         run: zig version
 
       - name: Check formatting
-        run: zig fmt --check src/
+        run: zig fmt --check .
 
-      - name: Build library
+      - name: Build project
         run: zig build
 
-      - name: Run tests (fast subset)
-        run: |
-          zig test src/utils.zig
-          zig test src/params.zig
-          zig test src/bit_utils.zig
-          zig test src/key.zig --test-filter "secret key"
-          zig test src/gates.zig --test-filter "gates basic"
+      - name: Run tests
+        run: ./zig-out/bin/zevm-test
 
-      - name: Run full test suite
-        run: zig build test
-        continue-on-error: true
-        timeout-minutes: 10
-
-      - name: Build examples
+      - name: Run examples
         run: |
-          zig build add_two_numbers
+          ./zig-out/bin/simple_contract
+          ./zig-out/bin/gas_inspector_example
+          ./zig-out/bin/precompile_example
+
+      - name: Run benchmarks
+        run: ./zig-out/bin/zevm-bench
 
   lint:
     name: Lint
@@ -66,8 +61,11 @@ jobs:
       - name: Format check
         run: zig fmt --check .
 
-  coverage:
-    name: Code Coverage
+      - name: Analyze code
+        run: zig build -Danalyze
+
+  security:
+    name: Security Scan
     runs-on: ubuntu-latest
     
     steps:
@@ -79,13 +77,33 @@ jobs:
         with:
           version: '0.15.1'
 
-      - name: Run tests with coverage
-        run: zig build test
+      - name: Build with security checks
+        run: |
+          zig build -Doptimize=ReleaseSafe
+          zig build -Doptimize=ReleaseFast
 
-      - name: Upload coverage reports
-        uses: codecov/codecov-action@v3
+  benchmark:
+    name: Performance Benchmark
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
         with:
-          files: ./coverage.txt
-          flags: unittests
-          name: zig-tfhe-coverage
-        continue-on-error: true
+          version: '0.15.1'
+
+      - name: Build optimized version
+        run: zig build -Doptimize=ReleaseFast
+
+      - name: Run benchmarks
+        run: ./zig-out/bin/zevm-bench
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark-results.json
