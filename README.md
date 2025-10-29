@@ -5,7 +5,7 @@
 [![Version](https://img.shields.io/badge/Version-0.1.0-orange.svg)](RELEASE_NOTES.md)
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)](https://github.com/10d9e/zevm/actions)
 [![Tests](https://img.shields.io/badge/Tests-100%25%20Passing-brightgreen.svg)](https://github.com/10d9e/zevm/actions)
-[![DAITU](https://img.shields.io/badge/AI-Assisted-blue.svg)](DAITU)
+[![DAITU](https://img.shields.io/badge/AI-DAITU%201.0-blue.svg)](DAITU)
 
 A high-performance Ethereum Virtual Machine implementation in Zig, ported from [revm](https://github.com/bluealloy/revm).
 
