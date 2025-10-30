@@ -7,19 +7,19 @@ const bytecode = @import("bytecode");
 const main = @import("main.zig");
 
 /// Mainnet EVM type alias
-pub const MainnetEvm = main.EvmTr;
+pub const MainnetEvm = main.Evm;
 
 /// Mainnet context type alias
 pub const MainnetContext = context.Context;
 
-/// Main builder trait
+/// Main builder
 pub const MainBuilder = struct {
     /// Build mainnet EVM without inspector
     pub fn buildMainnet(self: *MainnetContext) MainnetEvm {
         var instructions = main.Instructions{};
         var precompiles = main.Precompiles.new();
         var frame_stack = main.FrameStack.newPrealloc(8);
-        return main.EvmTr.new(
+        return main.Evm.init(
             self,
             null,
             &instructions,
@@ -33,7 +33,7 @@ pub const MainBuilder = struct {
         var instructions = main.Instructions{};
         var precompiles = main.Precompiles.new();
         var frame_stack = main.FrameStack.newPrealloc(8);
-        return main.EvmTr.new(
+        return main.Evm.init(
             self,
             inspector,
             &instructions,
@@ -43,7 +43,7 @@ pub const MainBuilder = struct {
     }
 };
 
-/// Main context trait
+/// Main context
 pub const MainContext = struct {
     /// Create new mainnet context
     pub fn mainnet() MainnetContext {
@@ -131,7 +131,7 @@ pub const MainnetHandler = struct {
     }
 };
 
-/// Execute EVM trait
+/// Execute EVM
 pub const ExecuteEvm = struct {
     /// Execute transaction
     pub fn execute(self: *MainnetEvm) !main.ExecutionResult {
@@ -155,7 +155,7 @@ pub const ExecuteEvm = struct {
     }
 };
 
-/// Execute commit EVM trait
+/// Execute commit EVM
 pub const ExecuteCommitEvm = struct {
     /// Execute and commit transaction
     pub fn executeAndCommit(self: *MainnetEvm) !main.ExecutionResult {

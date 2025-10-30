@@ -19,7 +19,7 @@ pub const BENCH_CALLER: primitives.Address = EEADDRESS;
 /// BENCH_CALLER_BALANCE balance
 pub const BENCH_CALLER_BALANCE: primitives.U256 = TEST_BALANCE;
 
-/// Database error marker trait
+/// Database error marker
 pub fn DBErrorMarker(comptime T: type) type {
     return struct {
         const Self = @This();

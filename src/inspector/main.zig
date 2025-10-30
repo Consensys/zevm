@@ -88,9 +88,9 @@ pub const ExecutionStatus = enum {
 
 /// EVM hooks into execution.
 ///
-/// This trait is used to enable tracing of the EVM execution.
+/// This interface is used to enable tracing of the EVM execution.
 ///
-/// Object that is implemented this trait is used in InspectorHandler to trace the EVM execution.
+/// Objects implementing this interface are used in InspectorHandler to trace the EVM execution.
 pub const Inspector = struct {
     /// Called before the interpreter is initialized.
     ///

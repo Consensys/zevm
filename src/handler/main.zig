@@ -188,8 +188,8 @@ pub const FrameData = struct {
     }
 };
 
-/// EVM trait for execution
-pub const EvmTr = struct {
+/// EVM for execution
+pub const Evm = struct {
     /// Context
     ctx: *context.Context,
     /// Inspector (optional)
@@ -202,14 +202,14 @@ pub const EvmTr = struct {
     frame_stack: *FrameStack,
 
     /// Create new EVM
-    pub fn new(
+    pub fn init(
         ctx: *context.Context,
         inspector: ?*Inspector,
         instructions: *Instructions,
         precompiles: *Precompiles,
         frame_stack: *FrameStack,
-    ) EvmTr {
-        return EvmTr{
+    ) Evm {
+        return Evm{
             .ctx = ctx,
             .inspector = inspector,
             .instructions = instructions,
@@ -219,23 +219,23 @@ pub const EvmTr = struct {
     }
 
     /// Get context
-    pub fn getContext(self: *EvmTr) *context.Context {
+    pub fn getContext(self: *Evm) *context.Context {
         return self.ctx;
     }
 
     /// Create frame
-    pub fn createFrame(self: *EvmTr, frame_data: FrameData) !Frame {
-        return Frame.new(frame_data, self.instructions, self.precompiles);
+    pub fn createFrame(self: *Evm, frame_data: FrameData) !Frame {
+        return Frame.init(frame_data, self.instructions, self.precompiles);
     }
 
     /// Execute frame
-    pub fn executeFrame(self: *EvmTr, frame: *Frame) !FrameResult {
+    pub fn executeFrame(self: *Evm, frame: *Frame) !FrameResult {
         return frame.execute(self.ctx);
     }
 };
 
-/// Frame trait
-pub const FrameTr = struct {
+/// Frame for execution
+pub const Frame = struct {
     /// Frame data
     data: FrameData,
     /// Instructions
@@ -246,8 +246,8 @@ pub const FrameTr = struct {
     interpreter: interpreter.Interpreter,
 
     /// Create new frame
-    pub fn new(data: FrameData, instructions: *Instructions, precompiles: *Precompiles) FrameTr {
-        return FrameTr{
+    pub fn init(data: FrameData, instructions: *Instructions, precompiles: *Precompiles) Frame {
+        return Frame{
             .data = data,
             .instructions = instructions,
             .precompiles = precompiles,
@@ -272,7 +272,7 @@ pub const FrameTr = struct {
     }
 
     /// Execute frame
-    pub fn execute(self: *FrameTr, _: *context.Context) !FrameResult {
+    pub fn execute(self: *Frame, _: *context.Context) !FrameResult {
         // Execute the interpreter
         _ = self.interpreter.execute();
 
@@ -290,9 +290,6 @@ pub const FrameTr = struct {
         return frame_result;
     }
 };
-
-/// Frame implementation
-pub const Frame = FrameTr;
 
 /// Instructions implementation
 pub const Instructions = struct {
@@ -365,16 +362,16 @@ pub const FrameStack = struct {
     }
 };
 
-/// Inspector trait
+/// Inspector for execution monitoring
 pub const Inspector = struct {
     /// Inspect before execution
-    pub fn inspectBefore(self: *Inspector, evm: *EvmTr) !void {
+    pub fn inspectBefore(self: *Inspector, evm: *Evm) !void {
         _ = self;
         _ = evm;
     }
 
     /// Inspect after execution
-    pub fn inspectAfter(self: *Inspector, evm: *EvmTr, result: *FrameResult) !void {
+    pub fn inspectAfter(self: *Inspector, evm: *Evm, result: *FrameResult) !void {
         _ = self;
         _ = evm;
         _ = result;
@@ -460,7 +457,7 @@ pub const testing = struct {
 
         var instructions = Instructions{};
         var precompiles = Precompiles.new();
-        const frame = Frame.new(frame_data, &instructions, &precompiles);
+        const frame = Frame.init(frame_data, &instructions, &precompiles);
         try stack.push(frame);
 
         std.debug.assert(stack.len() == 1);

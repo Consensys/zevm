@@ -419,7 +419,7 @@ pub const Context = struct {
     }
 
     /// Get all context components mutably
-    pub fn allMut(self: *Context) struct { BlockEnv, TxEnv, CfgEnv, *Journal, *@TypeOf(self.chain), *LocalContext } {
+    pub fn getAllMut(self: *Context) struct { BlockEnv, TxEnv, CfgEnv, *Journal, *@TypeOf(self.chain), *LocalContext } {
         return .{
             self.block,
             self.tx,
@@ -456,7 +456,7 @@ pub const Context = struct {
     }
 
     /// Get database mutably
-    pub fn dbMut(self: *Context) *@TypeOf(self.journaled_state.database) {
+    pub fn getDb(self: *Context) *@TypeOf(self.journaled_state.database) {
         return &self.journaled_state.database;
     }
 
@@ -466,7 +466,7 @@ pub const Context = struct {
     }
 
     /// Get journal mutably
-    pub fn journalMut(self: *Context) *Journal {
+    pub fn getJournalMut(self: *Context) *Journal {
         return &self.journaled_state;
     }
 
@@ -476,7 +476,7 @@ pub const Context = struct {
     }
 
     /// Get chain mutably
-    pub fn chainMut(self: *Context) *@TypeOf(self.chain) {
+    pub fn getChainMut(self: *Context) *@TypeOf(self.chain) {
         return &self.chain;
     }
 
@@ -486,7 +486,7 @@ pub const Context = struct {
     }
 
     /// Get local context mutably
-    pub fn localMut(self: *Context) *LocalContext {
+    pub fn getLocalMut(self: *Context) *LocalContext {
         return &self.local;
     }
 

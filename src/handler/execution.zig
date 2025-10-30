@@ -8,7 +8,7 @@ const main = @import("main.zig");
 pub const Execution = struct {
     /// Execute call frame
     pub fn executeCall(
-        evm: *main.EvmTr,
+        evm: *main.Evm,
         caller: primitives.Address,
         target: primitives.Address,
         value: primitives.U256,
@@ -36,7 +36,7 @@ pub const Execution = struct {
 
     /// Execute create frame
     pub fn executeCreate(
-        evm: *main.EvmTr,
+        evm: *main.Evm,
         caller: primitives.Address,
         value: primitives.U256,
         init_code: []const u8,
@@ -62,7 +62,7 @@ pub const Execution = struct {
 
     /// Execute delegate call frame
     pub fn executeDelegateCall(
-        evm: *main.EvmTr,
+        evm: *main.Evm,
         caller: primitives.Address,
         target: primitives.Address,
         input: []const u8,
@@ -89,7 +89,7 @@ pub const Execution = struct {
 
     /// Execute static call frame
     pub fn executeStaticCall(
-        evm: *main.EvmTr,
+        evm: *main.Evm,
         caller: primitives.Address,
         target: primitives.Address,
         input: []const u8,
@@ -100,7 +100,7 @@ pub const Execution = struct {
 
     /// Execute call code frame
     pub fn executeCallCode(
-        evm: *main.EvmTr,
+        evm: *main.Evm,
         caller: primitives.Address,
         target: primitives.Address,
         value: primitives.U256,
@@ -130,7 +130,7 @@ pub const Execution = struct {
 pub const ExecutionLoop = struct {
     /// Run execution loop
     pub fn run(
-        evm: *main.EvmTr,
+        evm: *main.Evm,
         initial_frame_data: main.FrameData,
     ) !main.FrameResult {
         // Create initial frame
@@ -151,7 +151,7 @@ pub const ExecutionLoop = struct {
 
     /// Handle frame result
     pub fn handleFrameResult(
-        evm: *main.EvmTr,
+        evm: *main.Evm,
         result: *main.FrameResult,
     ) !void {
         _ = evm;
@@ -214,7 +214,7 @@ pub const GasCalculation = struct {
 /// State management utilities
 pub const StateManagement = struct {
     /// Load accounts
-    pub fn loadAccounts(evm: *main.EvmTr) !void {
+    pub fn loadAccounts(evm: *main.Evm) !void {
         _ = evm;
 
         // Load accounts:
@@ -225,7 +225,7 @@ pub const StateManagement = struct {
     }
 
     /// Warm accounts
-    pub fn warmAccounts(evm: *main.EvmTr) !void {
+    pub fn warmAccounts(evm: *main.Evm) !void {
         _ = evm;
 
         // Warm accounts:
@@ -234,7 +234,7 @@ pub const StateManagement = struct {
     }
 
     /// Deduct gas costs
-    pub fn deductGasCosts(evm: *main.EvmTr, gas_cost: u64) !void {
+    pub fn deductGasCosts(evm: *main.Evm, gas_cost: u64) !void {
         _ = evm;
         _ = gas_cost;
 
@@ -245,7 +245,7 @@ pub const StateManagement = struct {
     }
 
     /// Reimburse caller
-    pub fn reimburseCaller(evm: *main.EvmTr, unused_gas: u64) !void {
+    pub fn reimburseCaller(evm: *main.Evm, unused_gas: u64) !void {
         _ = evm;
         _ = unused_gas;
 
@@ -256,7 +256,7 @@ pub const StateManagement = struct {
     }
 
     /// Reward beneficiary
-    pub fn rewardBeneficiary(evm: *main.EvmTr, gas_used: u64) !void {
+    pub fn rewardBeneficiary(evm: *main.Evm, gas_used: u64) !void {
         _ = evm;
         _ = gas_used;
 

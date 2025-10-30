@@ -7,13 +7,10 @@ pub const Evm = struct {
     /// Context of the EVM it is used to fetch data from database.
     ctx: Context,
     /// Inspector of the EVM it is used to inspect the EVM.
-    /// Its trait are defined in revm-inspector crate.
     inspector: void,
     /// Instructions provider of the EVM it is used to execute instructions.
-    /// `InstructionProvider` trait is defined in revm-handler crate.
     instruction: void,
     /// Precompile provider of the EVM it is used to execute precompiles.
-    /// `PrecompileProvider` trait is defined in revm-handler crate.
     precompiles: void,
     /// Frame that is going to be executed.
     frame_stack: FrameStack,
@@ -75,7 +72,7 @@ pub const Evm = struct {
     }
 
     /// Get context reference mutably
-    pub fn ctxMut(self: *Evm) *Context {
+    pub fn getCtxMut(self: *Evm) *Context {
         return &self.ctx;
     }
 
@@ -85,7 +82,7 @@ pub const Evm = struct {
     }
 
     /// Get inspector reference mutably
-    pub fn inspectorMut(self: *Evm) *@TypeOf(self.inspector) {
+    pub fn getInspectorMut(self: *Evm) *@TypeOf(self.inspector) {
         return &self.inspector;
     }
 
@@ -95,7 +92,7 @@ pub const Evm = struct {
     }
 
     /// Get instruction reference mutably
-    pub fn instructionMut(self: *Evm) *@TypeOf(self.instruction) {
+    pub fn getInstructionMut(self: *Evm) *@TypeOf(self.instruction) {
         return &self.instruction;
     }
 
@@ -105,17 +102,17 @@ pub const Evm = struct {
     }
 
     /// Get precompiles reference mutably
-    pub fn precompilesMut(self: *Evm) *@TypeOf(self.precompiles) {
+    pub fn getPrecompilesMut(self: *Evm) *@TypeOf(self.precompiles) {
         return &self.precompiles;
     }
 
     /// Get frame stack reference
-    pub fn frameStack(self: Evm) *const @TypeOf(self.frame_stack) {
+    pub fn getFrameStack(self: Evm) *const @TypeOf(self.frame_stack) {
         return &self.frame_stack;
     }
 
     /// Get frame stack reference mutably
-    pub fn frameStackMut(self: *Evm) *@TypeOf(self.frame_stack) {
+    pub fn getFrameStackMut(self: *Evm) *@TypeOf(self.frame_stack) {
         return &self.frame_stack;
     }
 };
