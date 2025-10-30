@@ -4,8 +4,8 @@ const state = @import("state");
 const bytecode = @import("bytecode");
 const database = @import("database");
 
-/// Journal entry trait
-pub const JournalEntryTr = struct {
+/// Journal entry factory functions
+pub const JournalEntryFactory = struct {
     pub fn accountTouched(address: primitives.Address) JournalEntry {
         return JournalEntry{ .AccountTouched = address };
     }
@@ -481,7 +481,7 @@ pub const JournalInner = struct {
     /// Mark account as touched.
     fn touchAccount(journal: *std.ArrayList(JournalEntry), address: primitives.Address, account: *state.Account) void {
         if (!account.isTouched()) {
-            journal.append(JournalEntryTr.accountTouched(address)) catch {};
+            journal.append(JournalEntryFactory.accountTouched(address)) catch {};
             account.markTouch();
         }
     }
@@ -504,7 +504,7 @@ pub const JournalInner = struct {
         const account = self.state.getPtr(address).?;
         JournalInner.touchAccount(&self.journal, address, account);
 
-        self.journal.append(JournalEntryTr.codeChanged(address)) catch {};
+        self.journal.append(JournalEntryFactory.codeChanged(address)) catch {};
 
         account.info.code_hash = hash;
         account.info.code = code;
@@ -530,13 +530,13 @@ pub const JournalInner = struct {
     /// Add journal entry for caller accounting.
     pub fn callerAccountingJournalEntry(self: *JournalInner, address: primitives.Address, old_balance: primitives.U256, bump_nonce: bool) void {
         // account balance changed.
-        self.journal.append(JournalEntryTr.balanceChanged(address, old_balance)) catch {};
+        self.journal.append(JournalEntryFactory.balanceChanged(address, old_balance)) catch {};
         // account is touched.
-        self.journal.append(JournalEntryTr.accountTouched(address)) catch {};
+        self.journal.append(JournalEntryFactory.accountTouched(address)) catch {};
 
         if (bump_nonce) {
             // nonce changed.
-            self.journal.append(JournalEntryTr.nonceChanged(address)) catch {};
+            self.journal.append(JournalEntryFactory.nonceChanged(address)) catch {};
         }
     }
 
@@ -550,7 +550,7 @@ pub const JournalInner = struct {
 
     /// Increments the nonce of the account.
     pub fn nonceBumpJournalEntry(self: *JournalInner, address: primitives.Address) void {
-        self.journal.append(JournalEntryTr.nonceChanged(address)) catch {};
+        self.journal.append(JournalEntryFactory.nonceChanged(address)) catch {};
     }
 
     /// Transfers balance from two accounts. Returns error if sender balance is not enough.
@@ -588,7 +588,7 @@ pub const JournalInner = struct {
         to_balance.* = to_balance_incr;
 
         // add journal entry
-        self.journal.append(JournalEntryTr.balanceTransfer(from, to, balance)) catch {};
+        self.journal.append(JournalEntryFactory.balanceTransfer(from, to, balance)) catch {};
 
         return null;
     }
@@ -636,7 +636,7 @@ pub const JournalInner = struct {
         const is_created_globally = target_acc.markCreatedLocally();
 
         // this entry will revert set nonce.
-        last_journal.append(JournalEntryTr.accountCreated(target_address, is_created_globally)) catch {};
+        last_journal.append(JournalEntryFactory.accountCreated(target_address, is_created_globally)) catch {};
         target_acc.info.code = null;
         // EIP-161: State trie clearing (invariant-preserving alternative)
         if (spec_id.isEnabledIn(primitives.SpecId.SpuriousDragon)) {
@@ -659,7 +659,7 @@ pub const JournalInner = struct {
         self.state.getPtr(caller).?.info.balance = self.state.getPtr(caller).?.info.balance.sub(balance) catch unreachable;
 
         // add journal entry of transferred balance
-        last_journal.append(JournalEntryTr.balanceTransfer(caller, target_address, balance)) catch {};
+        last_journal.append(JournalEntryFactory.balanceTransfer(caller, target_address, balance)) catch {};
 
         return checkpoint;
     }
@@ -739,10 +739,10 @@ pub const JournalInner = struct {
         const journal_entry = if (acc.isCreatedLocally() or !is_cancun_enabled) {
             acc.markSelfdestructedLocally();
             acc.info.balance = @as(primitives.U256, 0);
-            JournalEntryTr.accountDestroyed(address, target, destroyed_status, balance);
+            JournalEntryFactory.accountDestroyed(address, target, destroyed_status, balance);
         } else if (!std.mem.eql(u8, &address, &target)) {
             acc.info.balance = @as(primitives.U256, 0);
-            JournalEntryTr.balanceTransfer(address, target, balance);
+            JournalEntryFactory.balanceTransfer(address, target, balance);
         } else {
             // State is not changed:
             // * if we are after Cancun upgrade and
@@ -853,7 +853,7 @@ pub const JournalInner = struct {
 
         // journal loading of cold account.
         if (load.is_cold) {
-            self.journal.append(JournalEntryTr.accountWarmed(address)) catch {};
+            self.journal.append(JournalEntryFactory.accountWarmed(address)) catch {};
         }
 
         if (load_code and load.data.info.code == null) {
@@ -916,7 +916,7 @@ pub const JournalInner = struct {
 
         if (is_cold) {
             // add it to journal as cold loaded.
-            self.journal.append(JournalEntryTr.storageWarmed(address, key)) catch {};
+            self.journal.append(JournalEntryFactory.storageWarmed(address, key)) catch {};
         }
 
         return StateLoad.new(value, is_cold);
@@ -944,7 +944,7 @@ pub const JournalInner = struct {
             }, present.is_cold);
         }
 
-        self.journal.append(JournalEntryTr.storageChanged(address, key, present.data)) catch {};
+        self.journal.append(JournalEntryFactory.storageChanged(address, key, present.data)) catch {};
         // insert value into present state.
         slot.present_value = new_value;
         return StateLoad.new(SStoreResult{
@@ -989,7 +989,7 @@ pub const JournalInner = struct {
 
         if (had_value) |value| {
             // insert in journal only if value was changed.
-            self.journal.append(JournalEntryTr.transientStorageChanged(address, key, value)) catch {};
+            self.journal.append(JournalEntryFactory.transientStorageChanged(address, key, value)) catch {};
         }
     }
 
@@ -1050,16 +1050,16 @@ pub fn Journal(comptime DB: type) type {
             return &self.database;
         }
 
-        pub fn dbMut(self: *@This()) *DB {
+        pub fn getDbMut(self: *@This()) *DB {
             return &self.database;
         }
 
         pub fn sload(self: *@This(), address: primitives.Address, key: primitives.StorageKey) !StateLoad(primitives.StorageValue) {
-            return self.inner.sload(self.dbMut(), address, key, false);
+            return self.inner.sload(self.getDbMut(), address, key, false);
         }
 
         pub fn sstore(self: *@This(), address: primitives.Address, key: primitives.StorageKey, value: primitives.StorageValue) !StateLoad(SStoreResult) {
-            return self.inner.sstore(self.dbMut(), address, key, value, false);
+            return self.inner.sstore(self.getDbMut(), address, key, value, false);
         }
 
         pub fn tload(self: *@This(), address: primitives.Address, key: primitives.StorageKey) primitives.StorageValue {
@@ -1075,7 +1075,7 @@ pub fn Journal(comptime DB: type) type {
         }
 
         pub fn selfdestruct(self: *@This(), address: primitives.Address, target: primitives.Address) !StateLoad(SelfDestructResult) {
-            return self.inner.selfdestruct(self.dbMut(), address, target);
+            return self.inner.selfdestruct(self.getDbMut(), address, target);
         }
 
         pub fn warmAccessList(self: *@This(), access_list: std.HashMap(primitives.Address, std.ArrayList(primitives.StorageKey), std.hash_map.default_hash_fn(primitives.Address), std.hash_map.default_eql_fn(primitives.Address))) !void {
@@ -1104,7 +1104,7 @@ pub fn Journal(comptime DB: type) type {
         }
 
         pub fn transfer(self: *@This(), from: primitives.Address, to: primitives.Address, balance: primitives.U256) !?TransferError {
-            return self.inner.transfer(self.dbMut(), from, to, balance);
+            return self.inner.transfer(self.getDbMut(), from, to, balance);
         }
 
         pub fn transferLoaded(self: *@This(), from: primitives.Address, to: primitives.Address, balance: primitives.U256) ?TransferError {
@@ -1121,7 +1121,7 @@ pub fn Journal(comptime DB: type) type {
 
         /// Increments the balance of the account.
         pub fn balanceIncr(self: *@This(), address: primitives.Address, balance: primitives.U256) !void {
-            try self.inner.balanceIncr(self.dbMut(), address, balance);
+            try self.inner.balanceIncr(self.getDbMut(), address, balance);
         }
 
         /// Increments the nonce of the account.
@@ -1130,19 +1130,19 @@ pub fn Journal(comptime DB: type) type {
         }
 
         pub fn loadAccount(self: *@This(), address: primitives.Address) !StateLoad(*const state.Account) {
-            return self.inner.loadAccount(self.dbMut(), address);
+            return self.inner.loadAccount(self.getDbMut(), address);
         }
 
         pub fn loadAccountMutOptionalCode(self: *@This(), address: primitives.Address, load_code: bool, skip_cold_load: bool) !StateLoad(JournaledAccount) {
-            return self.inner.loadAccountMutOptionalCode(self.dbMut(), address, load_code, skip_cold_load);
+            return self.inner.loadAccountMutOptionalCode(self.getDbMut(), address, load_code, skip_cold_load);
         }
 
         pub fn loadAccountWithCode(self: *@This(), address: primitives.Address) !StateLoad(*const state.Account) {
-            return self.inner.loadCode(self.dbMut(), address);
+            return self.inner.loadCode(self.getDbMut(), address);
         }
 
         pub fn loadAccountDelegated(self: *@This(), address: primitives.Address) !StateLoad(AccountLoad) {
-            return self.inner.loadAccountDelegated(self.dbMut(), address);
+            return self.inner.loadAccountDelegated(self.getDbMut(), address);
         }
 
         pub fn getCheckpoint(self: *@This()) JournalCheckpoint {
@@ -1184,16 +1184,16 @@ pub fn Journal(comptime DB: type) type {
         }
 
         pub fn sloadSkipColdLoad(self: *@This(), address: primitives.Address, key: primitives.StorageKey, skip_cold_load: bool) !StateLoad(primitives.StorageValue) {
-            return self.inner.sload(self.dbMut(), address, key, skip_cold_load);
+            return self.inner.sload(self.getDbMut(), address, key, skip_cold_load);
         }
 
         pub fn sstoreSkipColdLoad(self: *@This(), address: primitives.Address, key: primitives.StorageKey, value: primitives.StorageValue, skip_cold_load: bool) !StateLoad(SStoreResult) {
-            return self.inner.sstore(self.dbMut(), address, key, value, skip_cold_load);
+            return self.inner.sstore(self.getDbMut(), address, key, value, skip_cold_load);
         }
 
         pub fn loadAccountInfoSkipColdLoad(self: *@This(), address: primitives.Address, load_code: bool, skip_cold_load: bool) !AccountInfoLoad {
             const spec = self.inner.spec;
-            const account = try self.inner.loadAccountOptional(self.dbMut(), address, load_code, skip_cold_load);
+            const account = try self.inner.loadAccountOptional(self.getDbMut(), address, load_code, skip_cold_load);
             return AccountInfoLoad.new(&account.data.info, account.is_cold, account.data.evm_stateClearAwareIsEmpty(spec));
         }
     };

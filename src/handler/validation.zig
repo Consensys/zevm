@@ -6,7 +6,7 @@ const main = @import("main.zig");
 /// Validation utilities
 pub const Validation = struct {
     /// Validate environment
-    pub fn validateEnv(evm: *main.EvmTr) !void {
+    pub fn validateEnv(evm: *main.Evm) !void {
         const ctx = evm.getContext();
 
         // Validate block environment
@@ -84,7 +84,7 @@ pub const Validation = struct {
     }
 
     /// Validate initial transaction gas
-    pub fn validateInitialTxGas(evm: *main.EvmTr) !InitialAndFloorGas {
+    pub fn validateInitialTxGas(evm: *main.Evm) !InitialAndFloorGas {
         const ctx = evm.getContext();
         const tx = &ctx.tx;
 
@@ -106,7 +106,7 @@ pub const Validation = struct {
     }
 
     /// Validate against state and deduct caller
-    pub fn validateAgainstStateAndDeductCaller(evm: *main.EvmTr) !void {
+    pub fn validateAgainstStateAndDeductCaller(evm: *main.Evm) !void {
         const ctx = evm.getContext();
         const tx = &ctx.tx;
 
