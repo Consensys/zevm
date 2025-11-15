@@ -38,7 +38,7 @@ pub const BlockEnv = struct {
             .gas_limit = std.math.maxInt(u64),
             .basefee = 0,
             .difficulty = @as(primitives.U256, 0),
-            .prevrandao = [_]u8{0} ** 32,
+            .prevrandao = null,
             .blob_excess_gas_and_price = BlobExcessGasAndPrice.new(0, primitives.BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE),
         };
     }
@@ -247,7 +247,7 @@ pub const BlockEnvBuilder = struct {
             .gas_limit = self.gas_limit orelse std.math.maxInt(u64),
             .basefee = self.basefee orelse 0,
             .difficulty = self.difficulty orelse @as(primitives.U256, 0),
-            .prevrandao = self.prevrandao orelse [_]u8{0} ** 32,
+            .prevrandao = self.prevrandao,
             .blob_excess_gas_and_price = self.blob_excess_gas_and_price orelse BlobExcessGasAndPrice.new(0, primitives.BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE),
         };
     }

@@ -318,6 +318,9 @@ pub const blake2 = @import("blake2.zig");
 pub const kzg_point_evaluation = @import("kzg_point_evaluation.zig");
 pub const bls12_381 = @import("bls12_381.zig");
 
+// Import test module
+pub const tests = @import("tests.zig");
+
 // Placeholder for testing
 pub const testing = struct {
     pub fn testPrecompile() !void {

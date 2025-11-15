@@ -302,7 +302,7 @@ fn testHandler() !void {
 
     var instructions = zevm.handler.Instructions{};
     var precompiles = zevm.handler.Precompiles.new();
-    const frame = zevm.handler.Frame.new(frame_data, &instructions, &precompiles);
+    const frame = zevm.handler.Frame.init(frame_data, &instructions, &precompiles);
     try frame_stack.push(frame);
     std.debug.assert(frame_stack.len() == 1);
 
