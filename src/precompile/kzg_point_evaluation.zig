@@ -62,7 +62,7 @@ pub fn kzgPointEvaluationRun(input: []const u8, gas_limit: u64) main.PrecompileR
     const commitment_bytes: [48]u8 = commitment[0..48].*;
     const proof_bytes: [48]u8 = proof[0..48].*;
 
-    const proof_valid = if (blst_wrapper.isAvailable()) 
+    const proof_valid = if (blst_wrapper.isAvailable())
         blst_wrapper.verifyKzgProof(commitment_bytes, z_bytes, y_bytes, proof_bytes) catch false
     else
         verifyKzgProof(commitment_bytes, z_bytes, y_bytes, proof_bytes);

@@ -180,7 +180,7 @@ fn runPairing(input: []const u8, pair_per_point_cost: u64, pair_base_cost: u64, 
     var i: usize = 0;
     while (i < input.len) : (i += PAIR_ELEMENT_LEN) {
         const g1_bytes = input[i..][0..G1_LEN];
-        const g2_bytes = input[i + G1_LEN..][0..G2_LEN];
+        const g2_bytes = input[i + G1_LEN ..][0..G2_LEN];
         if (!isValidG1Point(g1_bytes) or !isValidG2Point(g2_bytes)) {
             return main.PrecompileResult{ .err = main.PrecompileError.Bn254FieldPointNotAMember };
         }

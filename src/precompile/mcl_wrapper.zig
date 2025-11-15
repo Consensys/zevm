@@ -18,14 +18,14 @@ pub fn g1Add(a: [64]u8, b: [64]u8) ![64]u8 {
     if (!isAvailable()) {
         return error.MclNotAvailable;
     }
-    
+
     // TODO: Implement using mcl API
     // 1. Parse G1 points from bytes (big-endian to little-endian conversion)
     // 2. Add points
     // 3. Serialize result (little-endian to big-endian conversion)
     _ = a;
     _ = b;
-    
+
     var result: [64]u8 = undefined;
     @memset(&result, 0);
     return result;
@@ -38,11 +38,11 @@ pub fn g1Mul(point: [64]u8, scalar: [32]u8) ![64]u8 {
     if (!isAvailable()) {
         return error.MclNotAvailable;
     }
-    
+
     // TODO: Implement using mcl API
     _ = point;
     _ = scalar;
-    
+
     var result: [64]u8 = undefined;
     @memset(&result, 0);
     return result;
@@ -55,7 +55,7 @@ pub fn pairingCheck(pairs: []const struct { g1: [64]u8, g2: [128]u8 }) !bool {
     if (!isAvailable()) {
         return error.MclNotAvailable;
     }
-    
+
     // TODO: Implement using mcl API
     // Compute product of pairings and check if equals 1
     _ = pairs;
@@ -65,4 +65,3 @@ pub fn pairingCheck(pairs: []const struct { g1: [64]u8, g2: [128]u8 }) !bool {
 pub const MclError = error{
     MclNotAvailable,
 };
-

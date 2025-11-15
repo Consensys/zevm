@@ -12,9 +12,7 @@ pub const Secp256k1 = struct {
 
     /// Initialize a new secp256k1 context
     pub fn init() Secp256k1 {
-        const ctx = c.secp256k1_context_create(
-            c.SECP256K1_CONTEXT_VERIFY | c.SECP256K1_CONTEXT_SIGN
-        );
+        const ctx = c.secp256k1_context_create(c.SECP256K1_CONTEXT_VERIFY | c.SECP256K1_CONTEXT_SIGN);
         std.debug.assert(ctx != null);
         return Secp256k1{ .ctx = ctx.? };
     }
@@ -37,7 +35,7 @@ pub const Secp256k1 = struct {
         // Create recoverable signature
         var recoverable_sig: c.secp256k1_ecdsa_recoverable_signature = undefined;
         var mut_recid: c_int = @intCast(recid);
-        
+
         // Parse the compact signature with recovery ID
         if (c.secp256k1_ecdsa_recoverable_signature_parse_compact(
             self.ctx,
@@ -111,7 +109,7 @@ var global_ctx_mutex = std.Thread.Mutex{};
 pub fn getContext() ?Secp256k1 {
     global_ctx_mutex.lock();
     defer global_ctx_mutex.unlock();
-    
+
     if (global_ctx == null) {
         global_ctx = Secp256k1.init();
     }

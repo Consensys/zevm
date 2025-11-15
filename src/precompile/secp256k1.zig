@@ -51,7 +51,7 @@ pub fn ecRecoverRun(input: []const u8, gas_limit: u64) main.PrecompileResult {
     // Extract message, signature, and recovery ID
     var msg: [32]u8 = undefined;
     @memcpy(&msg, msg_bytes);
-    
+
     var sig: [64]u8 = undefined;
     @memcpy(&sig, sig_bytes);
 

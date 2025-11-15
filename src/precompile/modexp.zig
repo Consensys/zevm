@@ -90,7 +90,7 @@ fn calculateIterationCount(exp_length: u64, exp_highp: primitives.U256, multipli
 fn byzantiumGasCalc(base_len: u64, exp_len: u64, mod_len: u64, exp_highp: primitives.U256) u64 {
     const max_len = @max(@max(base_len, exp_len), mod_len);
     const iteration_count = calculateIterationCount(exp_len, exp_highp, 8);
-    
+
     var complexity: u128 = 0;
     if (max_len <= 64) {
         complexity = max_len * max_len;
@@ -100,7 +100,7 @@ fn byzantiumGasCalc(base_len: u64, exp_len: u64, mod_len: u64, exp_highp: primit
         const x: u128 = max_len;
         complexity = (x * x) / 16 + 480 * x - 199680;
     }
-    
+
     return @intCast(complexity * iteration_count / 20);
 }
 
@@ -117,7 +117,7 @@ fn berlinGasCalc(base_len: u64, exp_len: u64, mod_len: u64, exp_highp: primitive
 fn osakaGasCalc(base_len: u64, exp_len: u64, mod_len: u64, exp_highp: primitives.U256) u64 {
     const max_len = @max(@max(base_len, exp_len), mod_len);
     const iteration_count = calculateIterationCount(exp_len, exp_highp, 16);
-    
+
     var complexity: u64 = 0;
     if (max_len <= 32) {
         complexity = 16;
@@ -125,7 +125,7 @@ fn osakaGasCalc(base_len: u64, exp_len: u64, mod_len: u64, exp_highp: primitives
         const words = (max_len + 7) / 8;
         complexity = 2 * words * words;
     }
-    
+
     return 500 + @as(u64, @intCast(complexity * iteration_count));
 }
 
@@ -171,7 +171,7 @@ fn runInner(
     const exp_highp_len = @min(exp_len, 32);
     const data_start = HEADER_LENGTH;
     const exp_start = data_start + base_len;
-    
+
     var exp_highp_bytes: [32]u8 = [_]u8{0} ** 32;
     if (input.len > exp_start) {
         const available = @min(exp_highp_len, input.len - exp_start);
@@ -201,22 +201,22 @@ fn runInner(
 
     const base = if (base_len > 0 and padded_input.len >= base_len) padded_input[0..base_len] else &[_]u8{};
     const exp = if (exp_len > 0 and padded_input.len >= base_len + exp_len) padded_input[base_len..][0..exp_len] else &[_]u8{};
-    const modulus = if (mod_len > 0 and padded_input.len >= base_len + exp_len + mod_len) padded_input[base_len + exp_len..][0..mod_len] else &[_]u8{};
+    const modulus = if (mod_len > 0 and padded_input.len >= base_len + exp_len + mod_len) padded_input[base_len + exp_len ..][0..mod_len] else &[_]u8{};
 
     // Perform modular exponentiation
     const output_slice = modexpImpl(base, exp, modulus);
-    
+
     // Convert to owned slice for padding
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-    
+
     // Create a buffer for the output
     const output_buf = allocator.alloc(u8, output_slice.len) catch {
         return main.PrecompileResult{ .err = main.PrecompileError.ModexpModOverflow };
     };
     @memcpy(output_buf, output_slice);
-    
+
     const padded_output = leftPadVec(allocator, output_buf, mod_len) catch {
         allocator.free(output_buf);
         return main.PrecompileResult{ .err = main.PrecompileError.ModexpModOverflow };
@@ -245,12 +245,12 @@ fn modexpImpl(base: []const u8, exponent: []const u8, modulus: []const u8) []con
         for (base_trimmed) |b| {
             base_val = base_val * 256 + b;
         }
-        
+
         var exp_val: u64 = 0;
         for (exp_trimmed) |b| {
             exp_val = exp_val * 256 + b;
         }
-        
+
         var mod_val: u64 = 0;
         for (mod_trimmed) |b| {
             mod_val = mod_val * 256 + b;

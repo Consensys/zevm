@@ -22,11 +22,11 @@ pub fn build(b: *std.Build) void {
     // Link OpenSSL for P256Verify precompile
     lib.linkSystemLibrary("ssl");
     lib.linkSystemLibrary("crypto");
-    
+
     // Optional: Link blst for BLS12-381 and KZG (if installed)
     // Uncomment when blst is installed:
     // lib.linkSystemLibrary("blst");
-    
+
     // Optional: Link mcl for BN254 (if installed)
     // Uncomment when mcl is installed:
     // lib.linkSystemLibrary("mcl");
@@ -182,7 +182,7 @@ pub fn build(b: *std.Build) void {
     const run_tests = b.addRunArtifact(test_exe);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
-    
+
     // Note: Precompile unit tests (73 tests) are in src/precompile/tests.zig
     // They are automatically run when running: zig test src/precompile/tests.zig -I src
     // The CI should run both: ./zig-out/bin/zevm-test AND zig test src/precompile/tests.zig -I src

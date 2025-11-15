@@ -85,22 +85,23 @@ const MSM_MULTIPLIER: u64 = 1000;
 // Discount tables for MSM
 const DISCOUNT_TABLE_G1_MSM: [128]u16 = .{
     1000, 949, 848, 797, 764, 750, 738, 728, 719, 712, 705, 698, 692, 687, 682, 677, 673, 669, 665,
-    661, 658, 654, 651, 648, 645, 642, 640, 637, 635, 632, 630, 627, 625, 623, 621, 619, 617, 615,
-    613, 611, 609, 608, 606, 604, 603, 601, 599, 598, 596, 595, 593, 592, 591, 589, 588, 586, 585,
-    584, 582, 581, 580, 579, 577, 576, 575, 574, 573, 572, 570, 569, 568, 567, 566, 565, 564, 563,
-    562, 561, 560, 559, 558, 557, 556, 555, 554, 553, 552, 551, 550, 549, 548, 547, 547, 546, 545,
-    544, 543, 542, 541, 540, 540, 539, 538, 537, 536, 536, 535, 534, 533, 532, 532, 531, 530, 529,
-    528, 528, 527, 526, 525, 525, 524, 523, 522, 522, 521, 520, 520, 519,
+    661,  658, 654, 651, 648, 645, 642, 640, 637, 635, 632, 630, 627, 625, 623, 621, 619, 617, 615,
+    613,  611, 609, 608, 606, 604, 603, 601, 599, 598, 596, 595, 593, 592, 591, 589, 588, 586, 585,
+    584,  582, 581, 580, 579, 577, 576, 575, 574, 573, 572, 570, 569, 568, 567, 566, 565, 564, 563,
+    562,  561, 560, 559, 558, 557, 556, 555, 554, 553, 552, 551, 550, 549, 548, 547, 547, 546, 545,
+    544,  543, 542, 541, 540, 540, 539, 538, 537, 536, 536, 535, 534, 533, 532, 532, 531, 530, 529,
+    528,  528, 527, 526, 525, 525, 524, 523, 522, 522, 521, 520, 520, 519,
 };
 
 const DISCOUNT_TABLE_G2_MSM: [128]u16 = .{
     1000, 1000, 923, 884, 855, 832, 812, 796, 782, 770, 759, 749, 740, 732, 724, 717, 711, 704,
-    699, 693, 688, 683, 679, 674, 670, 666, 663, 659, 655, 652, 649, 646, 643, 640, 637, 634, 632,
-    629, 627, 624, 622, 620, 618, 615, 613, 611, 609, 607, 606, 604, 602, 600, 598, 597, 595, 593,
-    592, 590, 589, 587, 586, 584, 583, 582, 580, 579, 578, 576, 575, 574, 573, 571, 570, 569, 568,
-    567, 566, 565, 563, 562, 561, 560, 559, 558, 557, 556, 555, 554, 553, 552, 552, 551, 550, 549,
-    548, 547, 546, 545, 545, 544, 543, 542, 541, 541, 540, 539, 538, 537, 537, 536, 535, 535, 534,
-    533, 532, 532, 531, 530, 530, 529, 528, 528, 527, 526, 526, 525, 524, 524,
+    699,  693,  688, 683, 679, 674, 670, 666, 663, 659, 655, 652, 649, 646, 643, 640, 637, 634,
+    632,  629,  627, 624, 622, 620, 618, 615, 613, 611, 609, 607, 606, 604, 602, 600, 598, 597,
+    595,  593,  592, 590, 589, 587, 586, 584, 583, 582, 580, 579, 578, 576, 575, 574, 573, 571,
+    570,  569,  568, 567, 566, 565, 563, 562, 561, 560, 559, 558, 557, 556, 555, 554, 553, 552,
+    552,  551,  550, 549, 548, 547, 546, 545, 545, 544, 543, 542, 541, 541, 540, 539, 538, 537,
+    537,  536,  535, 535, 534, 533, 532, 532, 531, 530, 530, 529, 528, 528, 527, 526, 526, 525,
+    524,  524,
 };
 
 /// Remove padding from G1 point (128 bytes -> 96 bytes)
@@ -109,16 +110,16 @@ fn removeG1Padding(padded: []const u8) ![2][FP_LENGTH]u8 {
         return main.PrecompileError.Bls12381G1AddInputLength;
     }
     var result: [2][FP_LENGTH]u8 = undefined;
-    @memcpy(&result[0], padded[16..16 + FP_LENGTH]); // Skip 16-byte padding
-    @memcpy(&result[1], padded[80..80 + FP_LENGTH]); // Skip 16-byte padding
+    @memcpy(&result[0], padded[16 .. 16 + FP_LENGTH]); // Skip 16-byte padding
+    @memcpy(&result[1], padded[80 .. 80 + FP_LENGTH]); // Skip 16-byte padding
     return result;
 }
 
 /// Pad G1 point (96 bytes -> 128 bytes)
 fn padG1Point(unpadded: []const u8) [PADDED_G1_LENGTH]u8 {
     var result: [PADDED_G1_LENGTH]u8 = [_]u8{0} ** PADDED_G1_LENGTH;
-    @memcpy(result[16..16 + FP_LENGTH], unpadded[0..FP_LENGTH]);
-    @memcpy(result[80..80 + FP_LENGTH], unpadded[FP_LENGTH..]);
+    @memcpy(result[16 .. 16 + FP_LENGTH], unpadded[0..FP_LENGTH]);
+    @memcpy(result[80 .. 80 + FP_LENGTH], unpadded[FP_LENGTH..]);
     return result;
 }
 
@@ -128,20 +129,20 @@ fn removeG2Padding(padded: []const u8) ![4][FP_LENGTH]u8 {
         return main.PrecompileError.Bls12381G2AddInputLength;
     }
     var result: [4][FP_LENGTH]u8 = undefined;
-    @memcpy(&result[0], padded[16..16 + FP_LENGTH]);
-    @memcpy(&result[1], padded[80..80 + FP_LENGTH]);
-    @memcpy(&result[2], padded[144..144 + FP_LENGTH]);
-    @memcpy(&result[3], padded[208..208 + FP_LENGTH]);
+    @memcpy(&result[0], padded[16 .. 16 + FP_LENGTH]);
+    @memcpy(&result[1], padded[80 .. 80 + FP_LENGTH]);
+    @memcpy(&result[2], padded[144 .. 144 + FP_LENGTH]);
+    @memcpy(&result[3], padded[208 .. 208 + FP_LENGTH]);
     return result;
 }
 
 /// Pad G2 point (192 bytes -> 256 bytes)
 fn padG2Point(unpadded: []const u8) [PADDED_G2_LENGTH]u8 {
     var result: [PADDED_G2_LENGTH]u8 = [_]u8{0} ** PADDED_G2_LENGTH;
-    @memcpy(result[16..16 + FP_LENGTH], unpadded[0..FP_LENGTH]);
-    @memcpy(result[80..80 + FP_LENGTH], unpadded[FP_LENGTH..]);
-    @memcpy(result[144..144 + FP_LENGTH], unpadded[FP2_LENGTH..][0..FP_LENGTH]);
-    @memcpy(result[208..208 + FP_LENGTH], unpadded[FP2_LENGTH..][FP_LENGTH..]);
+    @memcpy(result[16 .. 16 + FP_LENGTH], unpadded[0..FP_LENGTH]);
+    @memcpy(result[80 .. 80 + FP_LENGTH], unpadded[FP_LENGTH..]);
+    @memcpy(result[144 .. 144 + FP_LENGTH], unpadded[FP2_LENGTH..][0..FP_LENGTH]);
+    @memcpy(result[208 .. 208 + FP_LENGTH], unpadded[FP2_LENGTH..][FP_LENGTH..]);
     return result;
 }
 
@@ -282,7 +283,7 @@ pub fn bls12PairingRun(input: []const u8, gas_limit: u64) main.PrecompileResult 
     var i: usize = 0;
     while (i < input.len) : (i += pair_len) {
         const g1_bytes = input[i..][0..PADDED_G1_LENGTH];
-        const g2_bytes = input[i + PADDED_G1_LENGTH..][0..PADDED_G2_LENGTH];
+        const g2_bytes = input[i + PADDED_G1_LENGTH ..][0..PADDED_G2_LENGTH];
         _ = g1_bytes;
         _ = g2_bytes;
         // TODO: Validate and add to pairing check

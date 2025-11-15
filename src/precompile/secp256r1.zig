@@ -71,4 +71,3 @@ fn verifyImpl(input: []const u8) bool {
 
     return openssl_wrapper.verifyP256(msg_bytes, sig_bytes, pk_bytes);
 }
-

@@ -96,4 +96,3 @@ pub fn verifyP256(msg: [32]u8, sig: [64]u8, pk: [64]u8) bool {
     const result = c.ECDSA_do_verify(&msg, msg.len, ecdsa_sig, eckey);
     return result == 1;
 }
-

@@ -8,7 +8,7 @@ var blst_available: ?bool = null;
 
 fn checkBlstAvailable() bool {
     if (blst_available) |available| return available;
-    
+
     // Try to compile a simple check
     // For now, assume not available (will be set to true when library is installed)
     blst_available = false;
@@ -27,14 +27,14 @@ pub fn g1Add(a: [96]u8, b: [96]u8) ![96]u8 {
     if (!isAvailable()) {
         return error.BlstNotAvailable;
     }
-    
+
     // TODO: Implement using blst API
     // 1. Parse G1 points from bytes
     // 2. Add points
     // 3. Serialize result
     _ = a;
     _ = b;
-    
+
     var result: [96]u8 = undefined;
     @memset(&result, 0);
     return result;
@@ -47,10 +47,10 @@ pub fn g1Msm(pairs: []const struct { point: [96]u8, scalar: [32]u8 }) ![96]u8 {
     if (!isAvailable()) {
         return error.BlstNotAvailable;
     }
-    
+
     // TODO: Implement using blst API
     _ = pairs;
-    
+
     var result: [96]u8 = undefined;
     @memset(&result, 0);
     return result;
@@ -63,11 +63,11 @@ pub fn g2Add(a: [192]u8, b: [192]u8) ![192]u8 {
     if (!isAvailable()) {
         return error.BlstNotAvailable;
     }
-    
+
     // TODO: Implement using blst API
     _ = a;
     _ = b;
-    
+
     var result: [192]u8 = undefined;
     @memset(&result, 0);
     return result;
@@ -80,10 +80,10 @@ pub fn g2Msm(pairs: []const struct { point: [192]u8, scalar: [32]u8 }) ![192]u8 
     if (!isAvailable()) {
         return error.BlstNotAvailable;
     }
-    
+
     // TODO: Implement using blst API
     _ = pairs;
-    
+
     var result: [192]u8 = undefined;
     @memset(&result, 0);
     return result;
@@ -96,7 +96,7 @@ pub fn pairingCheck(pairs: []const struct { g1: [96]u8, g2: [192]u8 }) !bool {
     if (!isAvailable()) {
         return error.BlstNotAvailable;
     }
-    
+
     // TODO: Implement using blst API
     _ = pairs;
     return false;
@@ -109,10 +109,10 @@ pub fn mapFpToG1(fp: [48]u8) ![96]u8 {
     if (!isAvailable()) {
         return error.BlstNotAvailable;
     }
-    
+
     // TODO: Implement using blst API
     _ = fp;
-    
+
     var result: [96]u8 = undefined;
     @memset(&result, 0);
     return result;
@@ -125,10 +125,10 @@ pub fn mapFp2ToG2(fp2: [96]u8) ![192]u8 {
     if (!isAvailable()) {
         return error.BlstNotAvailable;
     }
-    
+
     // TODO: Implement using blst API
     _ = fp2;
-    
+
     var result: [192]u8 = undefined;
     @memset(&result, 0);
     return result;
@@ -143,7 +143,7 @@ pub fn verifyKzgProof(commitment: [48]u8, z: [32]u8, y: [32]u8, proof: [48]u8) !
     if (!isAvailable()) {
         return error.BlstNotAvailable;
     }
-    
+
     // TODO: Implement using blst API
     // This requires the trusted setup (tau G2 point)
     _ = commitment;
@@ -156,4 +156,3 @@ pub fn verifyKzgProof(commitment: [48]u8, z: [32]u8, y: [32]u8, proof: [48]u8) !
 pub const BlstError = error{
     BlstNotAvailable,
 };
-
