@@ -524,8 +524,10 @@ pub const Bytecode = union(enum) {
         if (self.isEmpty()) {
             return primitives.KECCAK_EMPTY;
         } else {
-            // TODO: Implement keccak256
-            return [_]u8{0} ** 32;
+            const bytes = self.originalBytes();
+            var hash: primitives.Hash = undefined;
+            std.crypto.hash.sha3.Keccak256.hash(bytes, &hash, .{});
+            return hash;
         }
     }
 
@@ -591,7 +593,7 @@ pub const LegacyAnalyzedBytecode = struct {
         return Self{
             .bytecode = &[_]u8{STOP},
             .original_len = 1,
-            .jump_table = JumpTable.init(),
+            .jump_table = JumpTable.fromBytes(&[_]u8{0}, 1),
         };
     }
 
@@ -604,7 +606,7 @@ pub const LegacyAnalyzedBytecode = struct {
     }
 
     pub fn originalBytes(self: Self) []const u8 {
-        return self.bytecode;
+        return self.bytecode[0..self.original_len];
     }
 };
 
@@ -619,46 +621,139 @@ pub const LegacyRawBytecode = struct {
     }
 
     pub fn intoAnalyzed(self: Self) LegacyAnalyzedBytecode {
-        // TODO: Implement jump table analysis
-        return LegacyAnalyzedBytecode{
-            .bytecode = self.bytecode,
-            .original_len = self.bytecode.len,
-            .jump_table = JumpTable.init(),
-        };
+        return analyzeLegacy(self.bytecode);
     }
 };
 
 /// EIP-7702 bytecode
 pub const Eip7702Bytecode = struct {
     address: primitives.Address,
-    raw_bytes: []const u8,
+    version: u8,
+    raw_bytes: [23]u8,
 
     const Self = @This();
 
     pub fn new(address: primitives.Address) Self {
-        // TODO: Implement EIP-7702 magic bytes
+        // EIP-7702 format: 0xEF01 (magic) + 0x00 (version) + 20 bytes (address) = 23 bytes total
+        var raw_bytes: [23]u8 = undefined;
+        raw_bytes[0] = 0xEF;
+        raw_bytes[1] = 0x01; // Magic bytes
+        raw_bytes[2] = 0x00; // Version (currently only version 0 is supported)
+        @memcpy(raw_bytes[3..], &address);
         return Self{
             .address = address,
-            .raw_bytes = &[_]u8{ 0xEF, 0x00 } ++ address,
+            .version = 0,
+            .raw_bytes = raw_bytes,
         };
     }
 
     pub fn raw(self: Self) []const u8 {
-        return self.raw_bytes;
+        return &self.raw_bytes;
     }
 };
 
 /// Jump table for bytecode analysis
+/// A table of valid `jump` destinations.
+/// It is immutable, cheap to clone and memory efficient, with one bit per byte in the bytecode.
 pub const JumpTable = struct {
-    // TODO: Implement jump table using bitvec equivalent
-    data: []u8,
+    /// Bit vector data (one bit per bytecode position)
+    data: []const u8,
+    /// Number of bits in the table
+    bit_len: usize,
 
     const Self = @This();
 
     pub fn init() Self {
-        return Self{ .data = &[_]u8{} };
+        return Self{ .data = &[_]u8{}, .bit_len = 0 };
+    }
+
+    /// Create new JumpTable from raw bytes and bit length
+    pub fn fromBytes(data: []const u8, bit_len: usize) Self {
+        return Self{ .data = data, .bit_len = bit_len };
+    }
+
+    /// Checks if `pc` is a valid jump destination.
+    /// Uses bit operations for faster access
+    pub fn isValid(self: Self, pc: usize) bool {
+        if (pc >= self.bit_len) return false;
+        const byte_idx = pc >> 3;
+        const bit_idx = pc & 7;
+        if (byte_idx >= self.data.len) return false;
+        return (self.data[byte_idx] & (@as(u8, 1) << @intCast(bit_idx))) != 0;
+    }
+
+    /// Gets the length of the jump map in bits
+    pub fn len(self: Self) usize {
+        return self.bit_len;
+    }
+
+    /// Returns true if the jump map is empty
+    pub fn isEmpty(self: Self) bool {
+        return self.bit_len == 0;
     }
 };
+
+/// Analyzes the bytecode for use in LegacyAnalyzedBytecode.
+/// The bytecode may be padded with up to 33 zero bytes to ensure it ends with STOP
+/// and there are no incomplete immediates.
+/// Note: This is a simplified version that doesn't handle padding.
+/// For full padding support, the caller should manage memory allocation.
+fn analyzeLegacy(bytecode: []const u8) LegacyAnalyzedBytecode {
+    if (bytecode.len == 0) {
+        return LegacyAnalyzedBytecode{
+            .bytecode = &[_]u8{STOP},
+            .original_len = 0,
+            .jump_table = JumpTable.fromBytes(&[_]u8{0}, 1),
+        };
+    }
+
+    // Allocate bit vector (one bit per bytecode position)
+    const bit_vec_len = (bytecode.len + 7) / 8;
+    var bit_vec_buf: [256]u8 = undefined; // Stack buffer for small bytecode
+    var bit_vec: []u8 = if (bit_vec_len <= bit_vec_buf.len) bit_vec_buf[0..bit_vec_len] else &[_]u8{};
+    if (bit_vec.len > 0) {
+        @memset(bit_vec, 0);
+    }
+
+    var i: usize = 0;
+
+    // Analyze bytecode to find JUMPDEST positions
+    while (i < bytecode.len) {
+        const opcode = bytecode[i];
+
+        if (opcode == JUMPDEST) {
+            // Set bit at position i
+            if (i < bytecode.len) {
+                const byte_idx = i >> 3;
+                const bit_idx = i & 7;
+                if (byte_idx < bit_vec.len) {
+                    bit_vec[byte_idx] |= @as(u8, 1) << @intCast(bit_idx);
+                }
+            }
+            i += 1;
+        } else {
+            // Check if it's a PUSH instruction
+            const push_offset = opcode -% PUSH1;
+            if (push_offset < 32) {
+                // PUSH1 through PUSH32: skip opcode + immediate bytes
+                i += @as(usize, push_offset) + 2;
+            } else {
+                // Other opcodes: skip just the opcode
+                i += 1;
+            }
+        }
+    }
+
+    // For now, use the original bytecode without padding
+    // Full padding support would require proper memory management
+    const jump_table = if (bit_vec.len > 0) JumpTable.fromBytes(bit_vec, bytecode.len) else JumpTable.init();
+
+    return LegacyAnalyzedBytecode{
+        .bytecode = bytecode,
+        .original_len = bytecode.len,
+        .jump_table = jump_table,
+    };
+}
 
 /// Error type for bytecode decoding
 pub const BytecodeDecodeError = error{

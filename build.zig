@@ -17,6 +17,19 @@ pub fn build(b: *std.Build) void {
     // Add crypto dependencies
     lib.linkSystemLibrary("c");
     lib.linkSystemLibrary("m");
+    // Link secp256k1 for ECRECOVER precompile
+    lib.linkSystemLibrary("secp256k1");
+    // Link OpenSSL for P256Verify precompile
+    lib.linkSystemLibrary("ssl");
+    lib.linkSystemLibrary("crypto");
+
+    // Optional: Link blst for BLS12-381 and KZG (if installed)
+    // Uncomment when blst is installed:
+    // lib.linkSystemLibrary("blst");
+
+    // Optional: Link mcl for BN254 (if installed)
+    // Uncomment when mcl is installed:
+    // lib.linkSystemLibrary("mcl");
 
     // Install the library
     b.installArtifact(lib);
@@ -123,6 +136,9 @@ pub fn build(b: *std.Build) void {
 
     test_exe.linkSystemLibrary("c");
     test_exe.linkSystemLibrary("m");
+    test_exe.linkSystemLibrary("secp256k1");
+    test_exe.linkSystemLibrary("ssl");
+    test_exe.linkSystemLibrary("crypto");
     test_exe.root_module.addImport("primitives", primitives_module);
     test_exe.root_module.addImport("bytecode", bytecode_module);
     test_exe.root_module.addImport("state", state_module);
@@ -147,6 +163,9 @@ pub fn build(b: *std.Build) void {
 
     bench_exe.linkSystemLibrary("c");
     bench_exe.linkSystemLibrary("m");
+    bench_exe.linkSystemLibrary("secp256k1");
+    bench_exe.linkSystemLibrary("ssl");
+    bench_exe.linkSystemLibrary("crypto");
     bench_exe.root_module.addImport("primitives", primitives_module);
     bench_exe.root_module.addImport("bytecode", bytecode_module);
     bench_exe.root_module.addImport("state", state_module);
@@ -164,6 +183,10 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
 
+    // Note: Precompile unit tests (73 tests) are in src/precompile/tests.zig
+    // They are automatically run when running: zig test src/precompile/tests.zig -I src
+    // The CI should run both: ./zig-out/bin/zevm-test AND zig test src/precompile/tests.zig -I src
+
     // Example executable
     const example_exe = b.addExecutable(.{
         .name = "zevm-example",
@@ -176,6 +199,9 @@ pub fn build(b: *std.Build) void {
 
     example_exe.linkSystemLibrary("c");
     example_exe.linkSystemLibrary("m");
+    example_exe.linkSystemLibrary("secp256k1");
+    example_exe.linkSystemLibrary("ssl");
+    example_exe.linkSystemLibrary("crypto");
     example_exe.root_module.addImport("zevm", lib.root_module);
     example_exe.root_module.addImport("primitives", primitives_module);
     example_exe.root_module.addImport("bytecode", bytecode_module);
@@ -200,6 +226,9 @@ pub fn build(b: *std.Build) void {
     });
     simple_contract_exe.linkSystemLibrary("c");
     simple_contract_exe.linkSystemLibrary("m");
+    simple_contract_exe.linkSystemLibrary("secp256k1");
+    simple_contract_exe.linkSystemLibrary("ssl");
+    simple_contract_exe.linkSystemLibrary("crypto");
     simple_contract_exe.root_module.addImport("primitives", primitives_module);
     simple_contract_exe.root_module.addImport("bytecode", bytecode_module);
     simple_contract_exe.root_module.addImport("state", state_module);
@@ -221,6 +250,9 @@ pub fn build(b: *std.Build) void {
     });
     gas_inspector_exe.linkSystemLibrary("c");
     gas_inspector_exe.linkSystemLibrary("m");
+    gas_inspector_exe.linkSystemLibrary("secp256k1");
+    gas_inspector_exe.linkSystemLibrary("ssl");
+    gas_inspector_exe.linkSystemLibrary("crypto");
     gas_inspector_exe.root_module.addImport("primitives", primitives_module);
     gas_inspector_exe.root_module.addImport("bytecode", bytecode_module);
     gas_inspector_exe.root_module.addImport("state", state_module);
@@ -242,6 +274,9 @@ pub fn build(b: *std.Build) void {
     });
     precompile_exe.linkSystemLibrary("c");
     precompile_exe.linkSystemLibrary("m");
+    precompile_exe.linkSystemLibrary("secp256k1");
+    precompile_exe.linkSystemLibrary("ssl");
+    precompile_exe.linkSystemLibrary("crypto");
     precompile_exe.root_module.addImport("primitives", primitives_module);
     precompile_exe.root_module.addImport("bytecode", bytecode_module);
     precompile_exe.root_module.addImport("state", state_module);
@@ -264,6 +299,9 @@ pub fn build(b: *std.Build) void {
     });
     contract_deployment_exe.linkSystemLibrary("c");
     contract_deployment_exe.linkSystemLibrary("m");
+    contract_deployment_exe.linkSystemLibrary("secp256k1");
+    contract_deployment_exe.linkSystemLibrary("ssl");
+    contract_deployment_exe.linkSystemLibrary("crypto");
     contract_deployment_exe.root_module.addImport("primitives", primitives_module);
     contract_deployment_exe.root_module.addImport("bytecode", bytecode_module);
     contract_deployment_exe.root_module.addImport("state", state_module);
@@ -286,6 +324,9 @@ pub fn build(b: *std.Build) void {
     });
     uniswap_reserves_exe.linkSystemLibrary("c");
     uniswap_reserves_exe.linkSystemLibrary("m");
+    uniswap_reserves_exe.linkSystemLibrary("secp256k1");
+    uniswap_reserves_exe.linkSystemLibrary("ssl");
+    uniswap_reserves_exe.linkSystemLibrary("crypto");
     uniswap_reserves_exe.root_module.addImport("primitives", primitives_module);
     uniswap_reserves_exe.root_module.addImport("bytecode", bytecode_module);
     uniswap_reserves_exe.root_module.addImport("state", state_module);
@@ -308,6 +349,9 @@ pub fn build(b: *std.Build) void {
     });
     custom_opcodes_exe.linkSystemLibrary("c");
     custom_opcodes_exe.linkSystemLibrary("m");
+    custom_opcodes_exe.linkSystemLibrary("secp256k1");
+    custom_opcodes_exe.linkSystemLibrary("ssl");
+    custom_opcodes_exe.linkSystemLibrary("crypto");
     custom_opcodes_exe.root_module.addImport("primitives", primitives_module);
     custom_opcodes_exe.root_module.addImport("bytecode", bytecode_module);
     custom_opcodes_exe.root_module.addImport("state", state_module);
@@ -330,6 +374,9 @@ pub fn build(b: *std.Build) void {
     });
     database_components_exe.linkSystemLibrary("c");
     database_components_exe.linkSystemLibrary("m");
+    database_components_exe.linkSystemLibrary("secp256k1");
+    database_components_exe.linkSystemLibrary("ssl");
+    database_components_exe.linkSystemLibrary("crypto");
     database_components_exe.root_module.addImport("primitives", primitives_module);
     database_components_exe.root_module.addImport("bytecode", bytecode_module);
     database_components_exe.root_module.addImport("state", state_module);
@@ -352,6 +399,9 @@ pub fn build(b: *std.Build) void {
     });
     cheatcode_inspector_exe.linkSystemLibrary("c");
     cheatcode_inspector_exe.linkSystemLibrary("m");
+    cheatcode_inspector_exe.linkSystemLibrary("secp256k1");
+    cheatcode_inspector_exe.linkSystemLibrary("ssl");
+    cheatcode_inspector_exe.linkSystemLibrary("crypto");
     cheatcode_inspector_exe.root_module.addImport("primitives", primitives_module);
     cheatcode_inspector_exe.root_module.addImport("bytecode", bytecode_module);
     cheatcode_inspector_exe.root_module.addImport("state", state_module);

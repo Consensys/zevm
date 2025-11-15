@@ -2,6 +2,9 @@ const std = @import("std");
 const primitives = @import("primitives");
 const main = @import("main.zig");
 
+// Try to import secp256k1 wrapper, fall back to no-op if not available
+const secp256k1_wrapper = @import("secp256k1_wrapper.zig");
+
 /// ECRECOVER precompile
 pub const ECRECOVER = main.Precompile.new(
     main.PrecompileId.EcRec,
@@ -41,15 +44,27 @@ pub fn ecRecoverRun(input: []const u8, gas_limit: u64) main.PrecompileResult {
         return main.PrecompileResult{ .success = main.PrecompileOutput.new(ECRECOVER_BASE, &[_]u8{}) };
     }
 
-    const msg = padded_input[0..32];
+    const msg_bytes = padded_input[0..32];
     const recid = padded_input[63] - 27;
-    const sig = padded_input[64..128];
+    const sig_bytes = padded_input[64..128];
 
-    // For now, return empty result (would need proper secp256k1 implementation)
-    // In a real implementation, this would use a secp256k1 library
-    _ = msg;
-    _ = recid;
-    _ = sig;
+    // Extract message, signature, and recovery ID
+    var msg: [32]u8 = undefined;
+    @memcpy(&msg, msg_bytes);
 
+    var sig: [64]u8 = undefined;
+    @memcpy(&sig, sig_bytes);
+
+    // Try to recover address using secp256k1
+    if (secp256k1_wrapper.getContext()) |ctx| {
+        if (ctx.ecrecover(msg, sig, recid)) |address| {
+            // Pad address to 32 bytes (left-padded with zeros)
+            var output: [32]u8 = [_]u8{0} ** 32;
+            @memcpy(output[12..32], &address);
+            return main.PrecompileResult{ .success = main.PrecompileOutput.new(ECRECOVER_BASE, &output) };
+        }
+    }
+
+    // If recovery failed or library not available, return empty result
     return main.PrecompileResult{ .success = main.PrecompileOutput.new(ECRECOVER_BASE, &[_]u8{}) };
 }

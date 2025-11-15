@@ -1,6 +1,7 @@
 const std = @import("std");
 const primitives = @import("primitives");
 const main = @import("main.zig");
+const ripemd160_impl = @import("ripemd160.zig");
 
 /// SHA-256 precompile
 pub const SHA256 = main.Precompile.new(
@@ -47,12 +48,8 @@ pub fn ripemd160Run(input: []const u8, gas_limit: u64) main.PrecompileResult {
         return main.PrecompileResult{ .err = main.PrecompileError.OutOfGas };
     }
 
-    // Use placeholder RIPEMD-160 implementation (would need external library)
-    var output: [20]u8 = undefined;
-    // For now, just use SHA-256 truncated to 20 bytes as placeholder
-    var sha256_output: [32]u8 = undefined;
-    std.crypto.hash.sha2.Sha256.hash(input, &sha256_output, .{});
-    std.mem.copyForwards(u8, &output, sha256_output[0..20]);
+    // Use RIPEMD-160 implementation
+    const output = ripemd160_impl.ripemd160(input);
 
     // Pad to 32 bytes as per EVM specification
     var padded_output: [32]u8 = [_]u8{0} ** 32;
