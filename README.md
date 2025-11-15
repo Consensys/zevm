@@ -6,7 +6,7 @@
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)](https://github.com/10d9e/zevm/actions)
 [![Tests](https://img.shields.io/badge/Tests-100%25%20Passing-brightgreen.svg)](https://github.com/10d9e/zevm/actions)
 
-A high-performance Ethereum Virtual Machine implementation in Zig, ported from [revm](https://github.com/bluealloy/revm).
+A high-performance Ethereum Virtual Machine implementation in Zig.
 
 <img width="400" height="400" alt="image" src="https://github.com/user-attachments/assets/e840bec8-26e7-47ee-8b8c-d9723c9183bd" />
 
@@ -289,6 +289,7 @@ ZEVM v0.1.0 is now available! The core EVM functionality is complete and tested,
 
 ## Resources
 
+- ported from [revm](https://github.com/bluealloy/revm).
 - [Ethereum Yellow Paper](https://ethereum.github.io/yellowpaper/paper.pdf)
 - [EVM Opcodes](https://www.evm.codes/)
 - [Ethereum Improvement Proposals](https://eips.ethereum.org/)
