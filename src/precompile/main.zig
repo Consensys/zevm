@@ -301,6 +301,7 @@ pub const Precompiles = struct {
                 precompiles.add(bls12_381.pairing.PRECOMPILE) catch {};
                 precompiles.add(bls12_381.map_fp_to_g1.PRECOMPILE) catch {};
                 precompiles.add(bls12_381.map_fp2_to_g2.PRECOMPILE) catch {};
+                precompiles.add(secp256r1.P256VERIFY_OSAKA) catch {};
             },
         }
 
@@ -312,6 +313,7 @@ pub const Precompiles = struct {
 pub const identity = @import("identity.zig");
 pub const hash = @import("hash.zig");
 pub const secp256k1 = @import("secp256k1.zig");
+pub const secp256r1 = @import("secp256r1.zig");
 pub const modexp = @import("modexp.zig");
 pub const bn254 = @import("bn254.zig");
 pub const blake2 = @import("blake2.zig");
