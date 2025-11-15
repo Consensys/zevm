@@ -36,6 +36,18 @@ jobs:
       - name: Run tests
         run: ./zig-out/bin/zevm-test
 
+      - name: Install dependencies
+        run: |
+          if [ "${{ runner.os }}" == "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y libsecp256k1-dev libssl-dev
+          elif [ "${{ runner.os }}" == "macOS" ]; then
+            brew install libsecp256k1 openssl
+          fi
+
+      - name: Run precompile unit tests
+        run: zig test src/precompile/tests.zig -I src
+
       - name: Run examples
         run: |
           ./zig-out/bin/simple_contract
