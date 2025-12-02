@@ -59,30 +59,9 @@ jobs:
 
       - name: Run precompile unit tests
         run: |
-          # Build first to generate build_options module
           zig build --summary none 2>/dev/null || true
-          OPTIONS_PATH=$$(find .zig-cache -name "options.zig" -type f | head -1)
-          if [ -z "$$OPTIONS_PATH" ]; then
-            # Fallback: create a minimal build to generate options
-            zig build --summary none 2>&1 | head -5 || true
-            OPTIONS_PATH=$$(find .zig-cache -name "options.zig" -type f | head -1)
-          fi
-          # Run tests with all necessary modules and libraries
-          zig test src/precompile/tests.zig \
-            -lc \
-            -I src \
-            --mod build_options:$$OPTIONS_PATH \
-            --mod primitives:src/primitives/main.zig \
-            --mod bytecode:src/bytecode/main.zig \
-            --mod state:src/state/main.zig \
-            --mod database:src/database/main.zig \
-            --mod context:src/context/main.zig \
-            --mod interpreter:src/interpreter/main.zig \
-            --mod precompile:src/precompile/main.zig \
-            --mod handler:src/handler/main.zig \
-            --mod inspector:src/inspector/main.zig \
-            -lsecp256k1 -lssl -lcrypto -lblst -lmcl \
-            -I/usr/local/include -I/opt/homebrew/include
+          OPTIONS_FILE=$$(find .zig-cache -name options.zig -type f | head -1)
+          zig test src/precompile/tests.zig -lc -I src --mod build_options:"$$OPTIONS_FILE" --mod primitives:src/primitives/main.zig --mod bytecode:src/bytecode/main.zig --mod state:src/state/main.zig --mod database:src/database/main.zig --mod context:src/context/main.zig --mod interpreter:src/interpreter/main.zig --mod precompile:src/precompile/main.zig --mod handler:src/handler/main.zig --mod inspector:src/inspector/main.zig -lsecp256k1 -lssl -lcrypto -lblst -lmcl -I/usr/local/include -I/opt/homebrew/include
 
       - name: Run examples
         run: |
