@@ -84,9 +84,10 @@ pub fn build(b: *std.Build) void {
             }
 
             if (mcl_enabled) {
-                // Link mcl library
+                // Link mcl library (C++ library, needs C++ stdlib)
                 // Note: On macOS, if linking dynamically, DYLD_LIBRARY_PATH must include library location
                 step.linkSystemLibrary("mcl");
+                step.linkLibCpp(); // mcl is C++ library, needs C++ standard library
                 
                 // Use cwd_relative for absolute paths, or path for relative paths
                 if (std.fs.path.isAbsolute(mcl_inc)) {
