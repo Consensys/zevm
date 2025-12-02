@@ -44,7 +44,7 @@ pub fn build(b: *std.Build) void {
             blst_inc: []const u8,
             mcl_inc: []const u8,
             is_win: bool,
-            _: bool, // is_macos - unused but kept for API consistency
+            is_macos: bool,
         ) void {
             step.linkSystemLibrary("c");
 
@@ -69,7 +69,28 @@ pub fn build(b: *std.Build) void {
 
             // blst is required by default
             if (blst_enabled) {
-                step.linkSystemLibrary("blst");
+                // Try to link static library directly if available
+                const blst_static_paths = if (is_macos)
+                    [_][]const u8{ "/opt/homebrew/lib/libblst.a", "/usr/local/lib/libblst.a" }
+                else
+                    [_][]const u8{ "/usr/local/lib/libblst.a", "/usr/lib/libblst.a" };
+                
+                var found_blst_static = false;
+                for (blst_static_paths) |path| {
+                    // Check if static library exists
+                    const file = std.fs.openFileAbsolute(path, .{}) catch continue;
+                    file.close();
+                    // Link the static library directly
+                    step.addObjectFile(.{ .cwd_relative = path });
+                    found_blst_static = true;
+                    break;
+                }
+                
+                // Fall back to system library if static not found
+                if (!found_blst_static) {
+                    step.linkSystemLibrary("blst");
+                }
+                
                 // Add include path for blst headers
                 // For absolute paths, we need to handle them specially
                 // The issue is that cwd_relative doesn't work well with absolute paths
@@ -84,9 +105,28 @@ pub fn build(b: *std.Build) void {
             }
 
             if (mcl_enabled) {
-                // Link mcl library (C++ library, needs C++ stdlib)
-                // Note: On macOS, if linking dynamically, DYLD_LIBRARY_PATH must include library location
-                step.linkSystemLibrary("mcl");
+                // Try to link static library directly if available
+                const mcl_static_paths = if (is_macos)
+                    [_][]const u8{ "/opt/homebrew/lib/libmcl.a", "/usr/local/lib/libmcl.a" }
+                else
+                    [_][]const u8{ "/usr/local/lib/libmcl.a", "/usr/lib/libmcl.a" };
+                
+                var found_mcl_static = false;
+                for (mcl_static_paths) |path| {
+                    // Check if static library exists
+                    const file = std.fs.openFileAbsolute(path, .{}) catch continue;
+                    file.close();
+                    // Link the static library directly
+                    step.addObjectFile(.{ .cwd_relative = path });
+                    found_mcl_static = true;
+                    break;
+                }
+                
+                // Fall back to system library if static not found
+                if (!found_mcl_static) {
+                    step.linkSystemLibrary("mcl");
+                }
+                
                 step.linkLibCpp(); // mcl is C++ library, needs C++ standard library
                 
                 // Use cwd_relative for absolute paths, or path for relative paths
