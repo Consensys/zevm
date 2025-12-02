@@ -2,7 +2,7 @@
 
 [![Zig](https://img.shields.io/badge/Zig-0.15.1+-blue.svg)](https://ziglang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.3.0-orange.svg)](RELEASE_NOTES.md)
+[![Version](https://img.shields.io/badge/Version-0.3.1-orange.svg)](RELEASE_NOTES.md)
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)](https://github.com/10d9e/zevm/actions)
 [![Tests](https://img.shields.io/badge/Tests-100%25%20Passing-brightgreen.svg)](https://github.com/10d9e/zevm/actions)
 
@@ -13,12 +13,13 @@ A high-performance Ethereum Virtual Machine implementation in Zig.
 ## Overview
 
 ZEVM is a complete EVM implementation that provides:
-- Full Ethereum protocol support up to the Prague hardfork
+- Full Ethereum protocol support up to the Osaka hardfork (Fusaka-ready)
 - Modular architecture for easy customization
 - High-performance execution
-- Comprehensive precompile support
+- Comprehensive precompile support (all 18 standard precompiles)
 - Built-in debugging and inspection tools
 - Type-safe implementation leveraging Zig's compile-time guarantees
+- **Fusaka devnet ready** - Full support for Osaka hardfork features
 
 ## Features
 
@@ -49,19 +50,29 @@ ZEVM is a complete EVM implementation that provides:
 - Paris (The Merge)
 - Shanghai
 - Cancun
-- Prague (Latest)
+- Prague
+- **Osaka** (Latest) - **Fusaka devnet ready** ✅
 
 ### Precompiled Contracts
+
+All 18 standard Ethereum precompiles are fully implemented:
 
 - **Identity** (0x04): Data copy
 - **SHA256** (0x02): SHA-256 hash function
 - **RIPEMD160** (0x03): RIPEMD-160 hash function
 - **ECRECOVER** (0x01): Elliptic curve signature recovery
-- **ModExp** (0x05): Modular exponentiation
-- **BN254** (0x06-0x08): BN254 curve operations
+- **ModExp** (0x05): Modular exponentiation (Byzantium/Berlin/Osaka variants)
+- **BN254** (0x06-0x08): BN254 curve operations (Add, Mul, Pairing)
 - **Blake2F** (0x09): Blake2 compression function
-- **KZG Point Evaluation** (0x0A): KZG commitment verification
-- **BLS12-381** (0x0B-0x11): BLS12-381 curve operations
+- **KZG Point Evaluation** (0x0A): KZG commitment verification (EIP-4844)
+- **BLS12-381** (0x0B-0x11): All 7 BLS12-381 curve operations
+- **P256Verify** (0x100): secp256r1 signature verification (RIP-7212)
+
+**Osaka Hardfork Features:**
+- ✅ ModExp Osaka gas calculation (EIP-7883)
+- ✅ EIP-7823 input size limits (1024 bytes)
+- ✅ P256Verify Osaka gas cost (6900 gas)
+- ✅ PrecompileId support for Fusaka devnet
 
 ## Building
 
@@ -267,14 +278,26 @@ ZEVM is designed for high performance:
 - Optimized opcode dispatch
 - Fast precompile implementations
 
+## Fusaka Devnet Support
+
+ZEVM is **fully ready** for Fusaka devnet testing:
+
+- ✅ **PrecompileId Implementation**: Complete with Custom variant support
+- ✅ **Osaka Hardfork**: All Osaka-specific precompile changes implemented
+- ✅ **EIP-7823 & EIP-7883**: ModExp Osaka gas calculation and input limits
+- ✅ **P256Verify Osaka**: Correct gas cost (6900) for Osaka hardfork
+- ✅ **Feature Parity**: 100% match with revm reference implementation
+
+See [FUSAKA_READINESS.md](FUSAKA_READINESS.md) for complete verification checklist.
+
 ## Contributing
 
 Contributions are welcome! Areas for improvement:
-- Complete precompile implementations (BN254, BLS12-381, etc.)
 - Additional database backends
 - Performance optimizations
-- More comprehensive test coverage
+- Extended test coverage (Ethereum state tests)
 - Documentation improvements
+- EOF (EIP-7702) enhancements
 
 ## License
 
@@ -288,33 +311,37 @@ This project is a port of [revm](https://github.com/bluealloy/revm) to Zig. Plea
 
 ## Status
 
-ZEVM v0.1.0 is now available! The core EVM functionality is complete and tested, with comprehensive documentation and examples.
+ZEVM v0.3.1 is now available! **Fusaka devnet ready** with full Osaka hardfork support.
 
-### Completed
-- Core EVM interpreter
-- All standard opcodes
+### ✅ Completed
+- Core EVM interpreter with all standard opcodes
 - Gas tracking and metering
-- State management
-- Database interface
-- Basic precompiles (Identity, SHA256, RIPEMD160, ECRECOVER)
-- Inspector tools
-- Comprehensive test suite
-- Example applications
-- Complete documentation
-- Release notes and changelog
+- State management and database interface
+- **All 18 standard precompiles** (100% feature parity with revm)
+- **Osaka hardfork support** (ModExp Osaka, P256Verify Osaka)
+- **Fusaka devnet ready** (PrecompileId implementation)
+- Inspector tools and debugging capabilities
+- Comprehensive test suite (73+ precompile tests)
+- Cross-platform build system (macOS, Linux, Windows)
+- Static linking support for self-contained binaries
+- Complete documentation and examples
 
-### In Progress
-- Advanced precompiles (BN254, BLS12-381, KZG)
-- Full EOF (EIP-7702) support
-- Additional database backends
-- Performance benchmarking
+### 🚀 Recent Updates (v0.3.1)
+- **Fusaka/Osaka Support**: Full implementation of PrecompileId with Custom variant
+- **ModExp Osaka**: Fixed gas calculation to match EIP-7883 specification
+- **EIP-7823**: Corrected input size limits to 1024 bytes
+- **PrecompileId Enhancements**: Added `name()` and `precompile()` methods
+
+See [FUSAKA_READINESS.md](FUSAKA_READINESS.md) for detailed Fusaka readiness verification.
 
 ## Release Information
 
-- **Current Version**: v0.1.0
-- **Release Date**: October 27, 2024
+- **Current Version**: v0.3.1
+- **Release Date**: December 2, 2025
+- **Fusaka Status**: ✅ Ready for Fusaka devnet testing
 - **Release Notes**: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 - **Changelog**: [CHANGELOG.md](CHANGELOG.md)
+- **Fusaka Readiness**: [FUSAKA_READINESS.md](FUSAKA_READINESS.md)
 
 ## Resources
 
