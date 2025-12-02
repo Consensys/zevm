@@ -259,9 +259,9 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
 
-    // Note: Precompile unit tests (73 tests) are in src/precompile/tests.zig
-    // They are automatically run when running: zig test src/precompile/tests.zig -I src
-    // The CI should run both: ./zig-out/bin/zevm-test AND zig test src/precompile/tests.zig -I src
+    // Precompile unit tests - these are run via zig test command in CI
+    // The command needs to link libc and include all modules
+    // See .github/workflows/ci.yml for the full command
 
     // Example executable
     const example_exe = b.addExecutable(.{
