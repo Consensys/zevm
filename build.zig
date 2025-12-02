@@ -70,9 +70,12 @@ pub fn build(b: *std.Build) void {
             if (blst_enabled) {
                 step.linkSystemLibrary("blst");
                 // Add include path for blst headers
-                // For absolute paths, use cwd_relative which works with absolute paths
-                // Note: cwd_relative expects paths relative to build root, but we can pass absolute paths
+                // For absolute paths, we need to handle them specially
+                // The issue is that cwd_relative doesn't work well with absolute paths
+                // So we'll add the include path directly using addIncludePath
                 if (std.fs.path.isAbsolute(blst_inc)) {
+                    // For absolute paths, try using cwd_relative (may not work in all cases)
+                    // If this fails, the Makefile should install headers to a standard location
                     step.root_module.addIncludePath(.{ .cwd_relative = blst_inc });
                 } else {
                     step.root_module.addIncludePath(b_ctx.path(blst_inc));

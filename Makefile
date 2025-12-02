@@ -25,14 +25,14 @@ MCL_INCLUDE ?=
 ifeq ($(BLST_INCLUDE),)
 	ifeq ($(BLST_ENABLED),true)
 		# Check if blst is installed in standard locations first
-		ifeq ($(shell test -f /opt/homebrew/include/blst/blst.h && echo yes),yes)
-			# Already installed in /opt/homebrew/include/blst/, don't override
-		else ifeq ($(shell test -f /opt/homebrew/include/blst.h && echo yes),yes)
+		ifeq ($(shell test -f /opt/homebrew/include/blst.h && echo yes),yes)
 			# Already installed in /opt/homebrew/include/, don't override
-		else ifeq ($(shell test -f /usr/local/include/blst/blst.h && echo yes),yes)
-			# Already installed in /usr/local/include/blst/, don't override
+		else ifeq ($(shell test -f /opt/homebrew/include/blst/blst.h && echo yes),yes)
+			# Already installed in /opt/homebrew/include/blst/, don't override
 		else ifeq ($(shell test -f /usr/local/include/blst.h && echo yes),yes)
 			# Already installed in /usr/local/include/, don't override
+		else ifeq ($(shell test -f /usr/local/include/blst/blst.h && echo yes),yes)
+			# Already installed in /usr/local/include/blst/, don't override
 		else ifeq ($(shell test -f /tmp/blst/libblst.a && test -f /tmp/blst/bindings/blst.h && echo yes),yes)
 			# Use /tmp/blst if it exists and not installed system-wide
 			# blst.h is in bindings/, and our code includes <blst.h>, so point to bindings/
@@ -208,20 +208,22 @@ install-brew-deps:
 			fi; \
 			echo "$(GREEN)✓ blst headers verified at /tmp/blst/bindings/blst.h$(NC)"; \
 			echo "$(YELLOW)Installing blst library...$(NC)"; \
+			# Try to install to /opt/homebrew first (works without sudo if writable) \
 			if [ -d /opt/homebrew/lib ] && [ -w /opt/homebrew/lib ]; then \
 				cp libblst.a /opt/homebrew/lib/ 2>/dev/null || true; \
-				mkdir -p /opt/homebrew/include/blst 2>/dev/null || true; \
-				cp bindings/*.h /opt/homebrew/include/blst/ 2>/dev/null || true; \
-				if [ -f /opt/homebrew/include/blst/blst.h ]; then \
-					echo "$(GREEN)✓ blst installed to /opt/homebrew$(NC)"; \
+				mkdir -p /opt/homebrew/include 2>/dev/null || true; \
+				cp bindings/*.h /opt/homebrew/include/ 2>/dev/null || true; \
+				if [ -f /opt/homebrew/include/blst.h ]; then \
+					echo "$(GREEN)✓ blst installed to /opt/homebrew/include$(NC)"; \
 				else \
-					echo "$(YELLOW)⚠ Could not install to /opt/homebrew, will use /tmp/blst/bindings$(NC)"; \
+					echo "$(YELLOW)⚠ Could not install to /opt/homebrew/include, will use /tmp/blst/bindings$(NC)"; \
 				fi \
 			else \
-				sudo cp libblst.a /usr/local/lib/ 2>/dev/null || cp libblst.a /opt/homebrew/lib/ 2>/dev/null || true; \
-				sudo mkdir -p /usr/local/include/blst 2>/dev/null || mkdir -p /opt/homebrew/include/blst 2>/dev/null || true; \
-				sudo cp bindings/*.h /usr/local/include/blst/ 2>/dev/null || cp bindings/*.h /opt/homebrew/include/blst/ 2>/dev/null || true; \
-				if [ -f /opt/homebrew/include/blst/blst.h ] || [ -f /usr/local/include/blst/blst.h ]; then \
+				# Try with sudo or fallback to /usr/local \
+				sudo cp libblst.a /opt/homebrew/lib/ 2>/dev/null || cp libblst.a /usr/local/lib/ 2>/dev/null || true; \
+				sudo mkdir -p /opt/homebrew/include 2>/dev/null || mkdir -p /usr/local/include 2>/dev/null || true; \
+				sudo cp bindings/*.h /opt/homebrew/include/ 2>/dev/null || cp bindings/*.h /usr/local/include/ 2>/dev/null || true; \
+				if [ -f /opt/homebrew/include/blst.h ] || [ -f /usr/local/include/blst.h ]; then \
 					echo "$(GREEN)✓ blst installed$(NC)"; \
 				else \
 					echo "$(YELLOW)⚠ Could not install headers, will use /tmp/blst/bindings$(NC)"; \
