@@ -30,20 +30,14 @@ jobs:
       - name: Check formatting
         run: zig fmt --check .
 
+      - name: Install dependencies
+        run: make install-deps
+
       - name: Build project
-        run: zig build
+        run: make build
 
       - name: Run tests
-        run: ./zig-out/bin/zevm-test
-
-      - name: Install dependencies
-        run: |
-          if [ "${{ runner.os }}" == "Linux" ]; then
-            sudo apt-get update
-            sudo apt-get install -y libsecp256k1-dev libssl-dev
-          elif [ "${{ runner.os }}" == "macOS" ]; then
-            brew install libsecp256k1 openssl
-          fi
+        run: make test
 
       - name: Run precompile unit tests
         run: zig test src/precompile/tests.zig -I src
@@ -91,8 +85,12 @@ jobs:
         with:
           version: '0.15.1'
 
+      - name: Install dependencies
+        run: make install-deps
+
       - name: Build with security checks
         run: |
+          make build
           zig build -Doptimize=ReleaseSafe
           zig build -Doptimize=ReleaseFast
 
@@ -110,8 +108,13 @@ jobs:
         with:
           version: '0.15.1'
 
+      - name: Install dependencies
+        run: make install-deps
+
       - name: Build optimized version
-        run: zig build -Doptimize=ReleaseFast
+        run: |
+          make build
+          zig build -Doptimize=ReleaseFast
 
       - name: Run benchmarks
         run: ./zig-out/bin/zevm-bench
