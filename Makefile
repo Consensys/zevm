@@ -25,12 +25,17 @@ MCL_INCLUDE ?=
 ifeq ($(BLST_INCLUDE),)
 	ifeq ($(BLST_ENABLED),true)
 		# Check if blst is installed in standard locations first
-		ifeq ($(shell test -f /opt/homebrew/include/blst.h && echo yes),yes)
-			# Already installed in /opt/homebrew/include, don't override
+		ifeq ($(shell test -f /opt/homebrew/include/blst/blst.h && echo yes),yes)
+			# Already installed in /opt/homebrew/include/blst/, don't override
+		else ifeq ($(shell test -f /opt/homebrew/include/blst.h && echo yes),yes)
+			# Already installed in /opt/homebrew/include/, don't override
+		else ifeq ($(shell test -f /usr/local/include/blst/blst.h && echo yes),yes)
+			# Already installed in /usr/local/include/blst/, don't override
 		else ifeq ($(shell test -f /usr/local/include/blst.h && echo yes),yes)
-			# Already installed in /usr/local/include, don't override
-		else ifeq ($(shell test -f /tmp/blst/libblst.a && echo yes),yes)
+			# Already installed in /usr/local/include/, don't override
+		else ifeq ($(shell test -f /tmp/blst/libblst.a && test -f /tmp/blst/bindings/blst.h && echo yes),yes)
 			# Use /tmp/blst if it exists and not installed system-wide
+			# blst.h is in bindings/, and our code includes <blst.h>, so point to bindings/
 			BLST_INCLUDE := /tmp/blst/bindings
 		endif
 	endif
@@ -100,8 +105,26 @@ check-deps:
 	@command -v pkg-config >/dev/null 2>&1 || echo "$(YELLOW)⚠ pkg-config not found (may be needed)$(NC)"
 	@BLST_FOUND=0; MCL_FOUND=0; \
 	if [ "$(BLST_ENABLED)" = "true" ]; then \
-		if pkg-config --exists blst 2>/dev/null || [ -f /usr/local/lib/libblst.a ] || [ -f /opt/homebrew/lib/libblst.a ] || [ -f /usr/lib/libblst.a ] || [ -f /usr/local/lib/libblst.dylib ] || [ -f /opt/homebrew/lib/libblst.dylib ] || [ -f /usr/lib/libblst.dylib ] || [ -f /tmp/blst/libblst.a ]; then \
-			echo "$(GREEN)✓ blst library found$(NC)"; \
+		if pkg-config --exists blst 2>/dev/null; then \
+			echo "$(GREEN)✓ blst library found (via pkg-config)$(NC)"; \
+			BLST_FOUND=1; \
+		elif [ -f /opt/homebrew/lib/libblst.a ] || [ -f /opt/homebrew/lib/libblst.dylib ]; then \
+			if [ -f /opt/homebrew/include/blst/blst.h ] || [ -f /opt/homebrew/include/blst.h ]; then \
+				echo "$(GREEN)✓ blst library found in /opt/homebrew$(NC)"; \
+				BLST_FOUND=1; \
+			else \
+				echo "$(YELLOW)⚠ blst library found but headers missing$(NC)"; \
+			fi \
+		elif [ -f /usr/local/lib/libblst.a ] || [ -f /usr/local/lib/libblst.dylib ]; then \
+			if [ -f /usr/local/include/blst/blst.h ] || [ -f /usr/local/include/blst.h ]; then \
+				echo "$(GREEN)✓ blst library found in /usr/local$(NC)"; \
+				BLST_FOUND=1; \
+			else \
+				echo "$(YELLOW)⚠ blst library found but headers missing$(NC)"; \
+			fi \
+		elif [ -f /tmp/blst/libblst.a ] && [ -f /tmp/blst/bindings/blst.h ]; then \
+			echo "$(GREEN)✓ blst library found in /tmp/blst$(NC)"; \
+			echo "$(YELLOW)  Headers at /tmp/blst/bindings/blst.h$(NC)"; \
 			BLST_FOUND=1; \
 		else \
 			echo "$(RED)✗ blst library not found$(NC)"; \
@@ -176,11 +199,35 @@ install-brew-deps:
 				cd /tmp && git clone https://github.com/supranational/blst.git || exit 1; \
 			fi; \
 			cd /tmp/blst && ./build.sh || (echo "$(RED)✗ Failed to build blst$(NC)" && exit 1); \
+			if [ ! -f /tmp/blst/bindings/blst.h ]; then \
+				echo "$(RED)✗ blst.h not found after build at /tmp/blst/bindings/blst.h$(NC)"; \
+				echo "$(YELLOW)Checking /tmp/blst structure...$(NC)"; \
+				ls -la /tmp/blst/ 2>/dev/null || true; \
+				ls -la /tmp/blst/bindings/ 2>/dev/null || true; \
+				exit 1; \
+			fi; \
+			echo "$(GREEN)✓ blst headers verified at /tmp/blst/bindings/blst.h$(NC)"; \
 			echo "$(YELLOW)Installing blst library...$(NC)"; \
-			sudo cp libblst.a /usr/local/lib/ 2>/dev/null || cp libblst.a /opt/homebrew/lib/ 2>/dev/null || true; \
-			sudo mkdir -p /usr/local/include/blst 2>/dev/null || mkdir -p /opt/homebrew/include/blst 2>/dev/null || true; \
-			sudo cp bindings/*.h /usr/local/include/blst/ 2>/dev/null || cp bindings/*.h /opt/homebrew/include/blst/ 2>/dev/null || true; \
-			echo "$(GREEN)✓ blst installed$(NC)"; \
+			if [ -d /opt/homebrew/lib ] && [ -w /opt/homebrew/lib ]; then \
+				cp libblst.a /opt/homebrew/lib/ 2>/dev/null || true; \
+				mkdir -p /opt/homebrew/include/blst 2>/dev/null || true; \
+				cp bindings/*.h /opt/homebrew/include/blst/ 2>/dev/null || true; \
+				if [ -f /opt/homebrew/include/blst/blst.h ]; then \
+					echo "$(GREEN)✓ blst installed to /opt/homebrew$(NC)"; \
+				else \
+					echo "$(YELLOW)⚠ Could not install to /opt/homebrew, will use /tmp/blst/bindings$(NC)"; \
+				fi \
+			else \
+				sudo cp libblst.a /usr/local/lib/ 2>/dev/null || cp libblst.a /opt/homebrew/lib/ 2>/dev/null || true; \
+				sudo mkdir -p /usr/local/include/blst 2>/dev/null || mkdir -p /opt/homebrew/include/blst 2>/dev/null || true; \
+				sudo cp bindings/*.h /usr/local/include/blst/ 2>/dev/null || cp bindings/*.h /opt/homebrew/include/blst/ 2>/dev/null || true; \
+				if [ -f /opt/homebrew/include/blst/blst.h ] || [ -f /usr/local/include/blst/blst.h ]; then \
+					echo "$(GREEN)✓ blst installed$(NC)"; \
+				else \
+					echo "$(YELLOW)⚠ Could not install headers, will use /tmp/blst/bindings$(NC)"; \
+				fi \
+			fi; \
+			echo "$(GREEN)✓ blst build complete (headers available at /tmp/blst/bindings/blst.h)$(NC)"; \
 		fi \
 	fi
 	@if [ "$(MCL_ENABLED)" = "true" ]; then \

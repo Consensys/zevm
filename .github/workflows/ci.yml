@@ -33,6 +33,22 @@ jobs:
       - name: Install dependencies
         run: make install-deps
 
+      - name: Verify blst headers (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          if [ -f /tmp/blst/bindings/blst.h ]; then
+            echo "✓ blst.h found at /tmp/blst/bindings/blst.h"
+            ls -la /tmp/blst/bindings/blst.h
+          elif [ -f /opt/homebrew/include/blst/blst.h ]; then
+            echo "✓ blst.h found at /opt/homebrew/include/blst/blst.h"
+          elif [ -f /usr/local/include/blst/blst.h ]; then
+            echo "✓ blst.h found at /usr/local/include/blst/blst.h"
+          else
+            echo "✗ blst.h not found in expected locations"
+            find /tmp/blst -name "blst.h" 2>/dev/null || echo "No blst.h in /tmp/blst"
+            exit 1
+          fi
+
       - name: Build project
         run: make build
 

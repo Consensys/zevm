@@ -69,7 +69,9 @@ pub fn build(b: *std.Build) void {
             // blst is required by default
             if (blst_enabled) {
                 step.linkSystemLibrary("blst");
-                // Use cwd_relative for absolute paths, or path for relative paths
+                // Add include path for blst headers
+                // For absolute paths, use cwd_relative which works with absolute paths
+                // Note: cwd_relative expects paths relative to build root, but we can pass absolute paths
                 if (std.fs.path.isAbsolute(blst_inc)) {
                     step.root_module.addIncludePath(.{ .cwd_relative = blst_inc });
                 } else {
