@@ -28,25 +28,34 @@ jobs:
         run: zig version
 
       - name: Check formatting
-        run: zig fmt --check .
-
-      - name: Build project
-        run: zig build
-
-      - name: Run tests
-        run: ./zig-out/bin/zevm-test
+        run: zig fmt --check src/
 
       - name: Install dependencies
+        run: make install-deps
+
+      - name: Verify blst headers (macOS)
+        if: runner.os == 'macOS'
         run: |
-          if [ "${{ runner.os }}" == "Linux" ]; then
-            sudo apt-get update
-            sudo apt-get install -y libsecp256k1-dev libssl-dev
-          elif [ "${{ runner.os }}" == "macOS" ]; then
-            brew install libsecp256k1 openssl
+          if [ -f /tmp/blst/bindings/blst.h ]; then
+            echo "✓ blst.h found at /tmp/blst/bindings/blst.h"
+            ls -la /tmp/blst/bindings/blst.h
+          elif [ -f /opt/homebrew/include/blst/blst.h ]; then
+            echo "✓ blst.h found at /opt/homebrew/include/blst/blst.h"
+          elif [ -f /usr/local/include/blst/blst.h ]; then
+            echo "✓ blst.h found at /usr/local/include/blst/blst.h"
+          else
+            echo "✗ blst.h not found in expected locations"
+            find /tmp/blst -name "blst.h" 2>/dev/null || echo "No blst.h in /tmp/blst"
+            exit 1
           fi
 
-      - name: Run precompile unit tests
-        run: zig test src/precompile/tests.zig -I src
+      - name: Build project
+        run: make build
+
+      - name: Run tests
+        env:
+          DYLD_LIBRARY_PATH: /opt/homebrew/lib:/usr/local/lib
+        run: make test
 
       - name: Run examples
         run: |
@@ -76,7 +85,7 @@ jobs:
           version: '0.15.1'
 
       - name: Format check
-        run: zig fmt --check .
+        run: zig fmt --check src/
 
   security:
     name: Security Scan
@@ -91,8 +100,12 @@ jobs:
         with:
           version: '0.15.1'
 
+      - name: Install dependencies
+        run: make install-deps
+
       - name: Build with security checks
         run: |
+          make build
           zig build -Doptimize=ReleaseSafe
           zig build -Doptimize=ReleaseFast
 
@@ -110,8 +123,13 @@ jobs:
         with:
           version: '0.15.1'
 
+      - name: Install dependencies
+        run: make install-deps
+
       - name: Build optimized version
-        run: zig build -Doptimize=ReleaseFast
+        run: |
+          make build
+          zig build -Doptimize=ReleaseFast
 
       - name: Run benchmarks
         run: ./zig-out/bin/zevm-bench

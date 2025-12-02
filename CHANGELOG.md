@@ -25,6 +25,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - Nothing yet
 
+## [0.3.0] - 2025-12-20
+
+### Added
+- **Cross-Platform Makefile**: Comprehensive build system with OS detection and automated dependency installation
+- **Static Linking Support**: All binaries now statically link `blst` and `mcl` libraries for self-contained deployment
+- **Automated Dependency Management**: Makefile targets for installing dependencies on macOS, Linux, and Windows
+- **Source-Based Library Installation**: Automatic cloning and building of `blst` and `mcl` from source if not found
+- **Dependency Verification**: `make check-deps` target to verify all required dependencies before building
+- **CROSS_PLATFORM.md**: Comprehensive guide for building on all supported platforms
+- **PRECOMPILE_FEATURE_PARITY.md**: Detailed feature parity comparison with Rust revm implementation
+
+### Changed
+- **Build System**: Enhanced `build.zig` to support static linking with proper C++ standard library handling
+- **CI Workflow**: Simplified CI to use Makefile for consistent builds across platforms
+- **Library Linking**: Improved library detection and linking order for static libraries
+- **Documentation**: Updated README with new Makefile-based build instructions
+
+### Fixed
+- **Linux Static Linking**: Fixed C++ standard library linking to use `libstdc++` instead of `libc++` on Linux
+- **Ubuntu CI Build**: Resolved undefined symbol errors related to C++ standard library on Ubuntu CI runners
+- **macOS Dynamic Library Loading**: Fixed runtime library path issues on macOS CI
+- **Library Path Handling**: Improved handling of absolute vs relative library paths in build system
+
+### Security
+- **Static Linking**: Improved security posture with self-contained binaries that don't depend on system libraries
+
 ## [0.1.0] - 2024-10-27
 
 ### Added

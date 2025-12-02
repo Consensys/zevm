@@ -2,7 +2,7 @@
 
 [![Zig](https://img.shields.io/badge/Zig-0.15.1+-blue.svg)](https://ziglang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.1.0-orange.svg)](RELEASE_NOTES.md)
+[![Version](https://img.shields.io/badge/Version-0.3.0-orange.svg)](RELEASE_NOTES.md)
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)](https://github.com/10d9e/zevm/actions)
 [![Tests](https://img.shields.io/badge/Tests-100%25%20Passing-brightgreen.svg)](https://github.com/10d9e/zevm/actions)
 
@@ -65,12 +65,41 @@ ZEVM is a complete EVM implementation that provides:
 
 ## Building
 
+### Quick Start (Recommended)
+
+The easiest way to build ZEVM is using the provided Makefile:
+
+```bash
+# Auto-detect OS, install dependencies, and build
+make
+
+# Or step by step:
+make install-deps  # Install dependencies
+make build         # Build the project
+make test          # Run tests
+```
+
+The Makefile automatically:
+- Detects your operating system (macOS, Linux, Windows)
+- Installs required dependencies via the appropriate package manager
+- Builds the project with correct options
+
+See `make help` for more options.
+
 ### Prerequisites
 
 - Zig 0.15.1 or later
 - C compiler (for system libraries)
+- **blst library** (required, see [CROSS_PLATFORM.md](CROSS_PLATFORM.md) for installation)
+- **mcl library** (required, see [CROSS_PLATFORM.md](CROSS_PLATFORM.md) for installation)
+- **secp256k1** (required, typically available via package managers)
+- **OpenSSL** (required, typically available via package managers)
 
-### Build Commands
+**⚠️ Note**: If you see "library not found" errors for `blst` or `mcl`, you need to install these libraries first. See [CROSS_PLATFORM.md](CROSS_PLATFORM.md) for detailed installation instructions. You can temporarily disable them with `zig build -Dblst=false -Dmcl=false`, but this will disable related precompiles.
+
+### Manual Build Commands
+
+If you prefer to build manually:
 
 ```bash
 # Build the library and all executables

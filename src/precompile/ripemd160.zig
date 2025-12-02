@@ -54,10 +54,10 @@ const Context = struct {
         @memset(padding[1..pad_len], 0);
 
         if (self.buflen < 56) {
-            @memcpy(self.buf[self.buflen..][0..pad_len], &padding);
+            @memcpy(self.buf[self.buflen..][0..pad_len], padding[0..pad_len]);
             self.buflen += pad_len;
         } else {
-            @memcpy(self.buf[self.buflen..], padding[0..pad_len]);
+            @memcpy(self.buf[self.buflen..][0..pad_len], padding[0..pad_len]);
             self.processBlock();
             self.buflen = 0;
             @memset(&self.buf, 0);

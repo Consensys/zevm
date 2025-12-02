@@ -4,6 +4,169 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Detect target OS for platform-specific defaults
+    // Use the resolved target to get OS information
+    const target_info = target.result;
+    const is_windows = target_info.os.tag == .windows;
+
+    // Build options for crypto libraries
+    // All precompile dependencies are required by default
+    // Users can disable them with -Dblst=false or -Dmcl=false if needed
+    const enable_blst = b.option(bool, "blst", "Enable blst library for BLS12-381 and KZG operations") orelse true;
+    const enable_mcl = b.option(bool, "mcl", "Enable mcl library for BN254 operations") orelse true;
+
+    // Platform-specific default include paths
+    // Note: Users should override these with -Dblst-include=... or -Dmcl-include=...
+    // if libraries are installed in non-standard locations
+    const default_include_path = if (is_windows)
+        "C:/Program Files" // Windows default (users should override)
+    else if (target_info.os.tag == .macos)
+        "/opt/homebrew/include" // macOS Homebrew default
+    else
+        "/usr/local/include"; // Unix default (Linux, BSD)
+
+    const blst_include_path = b.option([]const u8, "blst-include", "Path to blst include directory") orelse default_include_path;
+    const mcl_include_path = b.option([]const u8, "mcl-include", "Path to mcl include directory") orelse default_include_path;
+
+    // Add compile flags for optional libraries
+    const lib_options = b.addOptions();
+    lib_options.addOption(bool, "enable_blst", enable_blst);
+    lib_options.addOption(bool, "enable_mcl", enable_mcl);
+    const lib_options_module = lib_options.createModule();
+
+    // Helper function to add crypto library linking to a step
+    const addCryptoLibraries = struct {
+        fn add(
+            b_ctx: *std.Build,
+            step: *std.Build.Step.Compile,
+            blst_enabled: bool,
+            mcl_enabled: bool,
+            blst_inc: []const u8,
+            mcl_inc: []const u8,
+            is_win: bool,
+            is_macos: bool,
+        ) void {
+            step.linkSystemLibrary("c");
+
+            // Math library (libm) is Unix-specific, not needed on Windows
+            if (!is_win) {
+                step.linkSystemLibrary("m");
+            }
+
+            step.linkSystemLibrary("secp256k1");
+
+            // OpenSSL library names differ by platform
+            if (is_win) {
+                // Windows: OpenSSL libraries are typically named libssl and libcrypto
+                // May need to adjust based on how OpenSSL is installed
+                step.linkSystemLibrary("ssl");
+                step.linkSystemLibrary("crypto");
+            } else {
+                // Unix (macOS, Linux, BSD): standard names
+                step.linkSystemLibrary("ssl");
+                step.linkSystemLibrary("crypto");
+            }
+
+            // blst is required by default
+            if (blst_enabled) {
+                // Try to link static library directly if available
+                const blst_static_paths = if (is_macos)
+                    [_][]const u8{ "/opt/homebrew/lib/libblst.a", "/usr/local/lib/libblst.a" }
+                else
+                    [_][]const u8{ "/usr/local/lib/libblst.a", "/usr/lib/libblst.a" };
+
+                var found_blst_static = false;
+                for (blst_static_paths) |path| {
+                    // Check if static library exists
+                    const file = std.fs.openFileAbsolute(path, .{}) catch continue;
+                    file.close();
+                    // Link the static library directly
+                    step.addObjectFile(.{ .cwd_relative = path });
+                    found_blst_static = true;
+                    break;
+                }
+
+                // Fall back to system library if static not found
+                if (!found_blst_static) {
+                    step.linkSystemLibrary("blst");
+                }
+
+                // Add include path for blst headers
+                // For absolute paths, we need to handle them specially
+                // The issue is that cwd_relative doesn't work well with absolute paths
+                // So we'll add the include path directly using addIncludePath
+                if (std.fs.path.isAbsolute(blst_inc)) {
+                    // For absolute paths, try using cwd_relative (may not work in all cases)
+                    // If this fails, the Makefile should install headers to a standard location
+                    step.root_module.addIncludePath(.{ .cwd_relative = blst_inc });
+                } else {
+                    step.root_module.addIncludePath(b_ctx.path(blst_inc));
+                }
+            }
+
+            if (mcl_enabled) {
+                // Link C++ standard library BEFORE static library on Linux
+                // libmcl.a was compiled with libstdc++ (GNU C++ library), not libc++
+                if (!is_macos) {
+                    // Linux: explicitly link libstdc++ BEFORE static library
+                    // This is critical - libmcl.a needs libstdc++ symbols
+                    step.linkSystemLibrary("stdc++");
+                }
+
+                // Try to link static library directly if available
+                const mcl_static_paths = if (is_macos)
+                    [_][]const u8{ "/opt/homebrew/lib/libmcl.a", "/usr/local/lib/libmcl.a" }
+                else
+                    [_][]const u8{ "/usr/local/lib/libmcl.a", "/usr/lib/libmcl.a" };
+
+                var found_mcl_static = false;
+                for (mcl_static_paths) |path| {
+                    // Check if static library exists
+                    const file = std.fs.openFileAbsolute(path, .{}) catch continue;
+                    file.close();
+                    // On Linux, addObjectFile() may trigger automatic linkLibCpp() which adds -lc++
+                    // But we need -lstdc++. So we'll use the library path approach instead
+                    if (is_macos) {
+                        // macOS: use addObjectFile() for static linking
+                        step.addObjectFile(.{ .cwd_relative = path });
+                        found_mcl_static = true;
+                        break;
+                    } else {
+                        // Linux: add library path and let linker find static library
+                        // This avoids automatic linkLibCpp() call
+                        const lib_dir = std.fs.path.dirname(path) orelse continue;
+                        step.addLibraryPath(.{ .cwd_relative = lib_dir });
+                        step.linkSystemLibrary("mcl");
+                        found_mcl_static = true;
+                        break;
+                    }
+                }
+
+                // Fall back to system library if static not found
+                if (!found_mcl_static) {
+                    step.linkSystemLibrary("mcl");
+                }
+
+                // Link C++ standard library AFTER the static library
+                // On macOS, use libc++
+                // On Linux, add libstdc++ again after static library to ensure symbols are resolved
+                if (is_macos) {
+                    step.linkLibCpp(); // macOS uses libc++
+                } else {
+                    // Linux: link libstdc++ AFTER static library to resolve undefined symbols
+                    step.linkSystemLibrary("stdc++");
+                }
+
+                // Use cwd_relative for absolute paths, or path for relative paths
+                if (std.fs.path.isAbsolute(mcl_inc)) {
+                    step.root_module.addIncludePath(.{ .cwd_relative = mcl_inc });
+                } else {
+                    step.root_module.addIncludePath(b_ctx.path(mcl_inc));
+                }
+            }
+        }
+    }.add;
+
     // Main library
     const lib = b.addLibrary(.{
         .name = "zevm",
@@ -13,23 +176,10 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    lib.root_module.addImport("build_options", lib_options_module);
 
     // Add crypto dependencies
-    lib.linkSystemLibrary("c");
-    lib.linkSystemLibrary("m");
-    // Link secp256k1 for ECRECOVER precompile
-    lib.linkSystemLibrary("secp256k1");
-    // Link OpenSSL for P256Verify precompile
-    lib.linkSystemLibrary("ssl");
-    lib.linkSystemLibrary("crypto");
-
-    // Optional: Link blst for BLS12-381 and KZG (if installed)
-    // Uncomment when blst is installed:
-    // lib.linkSystemLibrary("blst");
-
-    // Optional: Link mcl for BN254 (if installed)
-    // Uncomment when mcl is installed:
-    // lib.linkSystemLibrary("mcl");
+    addCryptoLibraries(b, lib, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
 
     // Install the library
     b.installArtifact(lib);
@@ -102,6 +252,7 @@ pub fn build(b: *std.Build) void {
     interpreter_module.addImport("primitives", primitives_module);
     interpreter_module.addImport("bytecode", bytecode_module);
     interpreter_module.addImport("context", context_module);
+    precompile_module.addImport("build_options", lib_options_module);
     precompile_module.addImport("primitives", primitives_module);
     handler_module.addImport("primitives", primitives_module);
     handler_module.addImport("bytecode", bytecode_module);
@@ -134,11 +285,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    test_exe.linkSystemLibrary("c");
-    test_exe.linkSystemLibrary("m");
-    test_exe.linkSystemLibrary("secp256k1");
-    test_exe.linkSystemLibrary("ssl");
-    test_exe.linkSystemLibrary("crypto");
+    addCryptoLibraries(b, test_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
+    test_exe.root_module.addImport("build_options", lib_options_module);
     test_exe.root_module.addImport("primitives", primitives_module);
     test_exe.root_module.addImport("bytecode", bytecode_module);
     test_exe.root_module.addImport("state", state_module);
@@ -161,11 +309,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    bench_exe.linkSystemLibrary("c");
-    bench_exe.linkSystemLibrary("m");
-    bench_exe.linkSystemLibrary("secp256k1");
-    bench_exe.linkSystemLibrary("ssl");
-    bench_exe.linkSystemLibrary("crypto");
+    addCryptoLibraries(b, bench_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
+    bench_exe.root_module.addImport("build_options", lib_options_module);
     bench_exe.root_module.addImport("primitives", primitives_module);
     bench_exe.root_module.addImport("bytecode", bytecode_module);
     bench_exe.root_module.addImport("state", state_module);
@@ -183,9 +328,9 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
 
-    // Note: Precompile unit tests (73 tests) are in src/precompile/tests.zig
-    // They are automatically run when running: zig test src/precompile/tests.zig -I src
-    // The CI should run both: ./zig-out/bin/zevm-test AND zig test src/precompile/tests.zig -I src
+    // Precompile unit tests - these are run via zig test command in CI
+    // The command needs to link libc and include all modules
+    // See .github/workflows/ci.yml for the full command
 
     // Example executable
     const example_exe = b.addExecutable(.{
@@ -197,11 +342,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    example_exe.linkSystemLibrary("c");
-    example_exe.linkSystemLibrary("m");
-    example_exe.linkSystemLibrary("secp256k1");
-    example_exe.linkSystemLibrary("ssl");
-    example_exe.linkSystemLibrary("crypto");
+    addCryptoLibraries(b, example_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
+    example_exe.root_module.addImport("build_options", lib_options_module);
     example_exe.root_module.addImport("zevm", lib.root_module);
     example_exe.root_module.addImport("primitives", primitives_module);
     example_exe.root_module.addImport("bytecode", bytecode_module);
@@ -224,11 +366,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    simple_contract_exe.linkSystemLibrary("c");
-    simple_contract_exe.linkSystemLibrary("m");
-    simple_contract_exe.linkSystemLibrary("secp256k1");
-    simple_contract_exe.linkSystemLibrary("ssl");
-    simple_contract_exe.linkSystemLibrary("crypto");
+    addCryptoLibraries(b, simple_contract_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
+    simple_contract_exe.root_module.addImport("build_options", lib_options_module);
     simple_contract_exe.root_module.addImport("primitives", primitives_module);
     simple_contract_exe.root_module.addImport("bytecode", bytecode_module);
     simple_contract_exe.root_module.addImport("state", state_module);
@@ -248,11 +387,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    gas_inspector_exe.linkSystemLibrary("c");
-    gas_inspector_exe.linkSystemLibrary("m");
-    gas_inspector_exe.linkSystemLibrary("secp256k1");
-    gas_inspector_exe.linkSystemLibrary("ssl");
-    gas_inspector_exe.linkSystemLibrary("crypto");
+    addCryptoLibraries(b, gas_inspector_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
+    gas_inspector_exe.root_module.addImport("build_options", lib_options_module);
     gas_inspector_exe.root_module.addImport("primitives", primitives_module);
     gas_inspector_exe.root_module.addImport("bytecode", bytecode_module);
     gas_inspector_exe.root_module.addImport("state", state_module);
@@ -272,11 +408,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    precompile_exe.linkSystemLibrary("c");
-    precompile_exe.linkSystemLibrary("m");
-    precompile_exe.linkSystemLibrary("secp256k1");
-    precompile_exe.linkSystemLibrary("ssl");
-    precompile_exe.linkSystemLibrary("crypto");
+    addCryptoLibraries(b, precompile_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
+    precompile_exe.root_module.addImport("build_options", lib_options_module);
     precompile_exe.root_module.addImport("primitives", primitives_module);
     precompile_exe.root_module.addImport("bytecode", bytecode_module);
     precompile_exe.root_module.addImport("state", state_module);
@@ -297,11 +430,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    contract_deployment_exe.linkSystemLibrary("c");
-    contract_deployment_exe.linkSystemLibrary("m");
-    contract_deployment_exe.linkSystemLibrary("secp256k1");
-    contract_deployment_exe.linkSystemLibrary("ssl");
-    contract_deployment_exe.linkSystemLibrary("crypto");
+    addCryptoLibraries(b, contract_deployment_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
+    contract_deployment_exe.root_module.addImport("build_options", lib_options_module);
     contract_deployment_exe.root_module.addImport("primitives", primitives_module);
     contract_deployment_exe.root_module.addImport("bytecode", bytecode_module);
     contract_deployment_exe.root_module.addImport("state", state_module);
@@ -322,11 +452,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    uniswap_reserves_exe.linkSystemLibrary("c");
-    uniswap_reserves_exe.linkSystemLibrary("m");
-    uniswap_reserves_exe.linkSystemLibrary("secp256k1");
-    uniswap_reserves_exe.linkSystemLibrary("ssl");
-    uniswap_reserves_exe.linkSystemLibrary("crypto");
+    addCryptoLibraries(b, uniswap_reserves_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
+    uniswap_reserves_exe.root_module.addImport("build_options", lib_options_module);
     uniswap_reserves_exe.root_module.addImport("primitives", primitives_module);
     uniswap_reserves_exe.root_module.addImport("bytecode", bytecode_module);
     uniswap_reserves_exe.root_module.addImport("state", state_module);
@@ -347,11 +474,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    custom_opcodes_exe.linkSystemLibrary("c");
-    custom_opcodes_exe.linkSystemLibrary("m");
-    custom_opcodes_exe.linkSystemLibrary("secp256k1");
-    custom_opcodes_exe.linkSystemLibrary("ssl");
-    custom_opcodes_exe.linkSystemLibrary("crypto");
+    addCryptoLibraries(b, custom_opcodes_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
+    custom_opcodes_exe.root_module.addImport("build_options", lib_options_module);
     custom_opcodes_exe.root_module.addImport("primitives", primitives_module);
     custom_opcodes_exe.root_module.addImport("bytecode", bytecode_module);
     custom_opcodes_exe.root_module.addImport("state", state_module);
@@ -372,11 +496,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    database_components_exe.linkSystemLibrary("c");
-    database_components_exe.linkSystemLibrary("m");
-    database_components_exe.linkSystemLibrary("secp256k1");
-    database_components_exe.linkSystemLibrary("ssl");
-    database_components_exe.linkSystemLibrary("crypto");
+    addCryptoLibraries(b, database_components_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
+    database_components_exe.root_module.addImport("build_options", lib_options_module);
     database_components_exe.root_module.addImport("primitives", primitives_module);
     database_components_exe.root_module.addImport("bytecode", bytecode_module);
     database_components_exe.root_module.addImport("state", state_module);
@@ -397,11 +518,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    cheatcode_inspector_exe.linkSystemLibrary("c");
-    cheatcode_inspector_exe.linkSystemLibrary("m");
-    cheatcode_inspector_exe.linkSystemLibrary("secp256k1");
-    cheatcode_inspector_exe.linkSystemLibrary("ssl");
-    cheatcode_inspector_exe.linkSystemLibrary("crypto");
+    addCryptoLibraries(b, cheatcode_inspector_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
+    cheatcode_inspector_exe.root_module.addImport("build_options", lib_options_module);
     cheatcode_inspector_exe.root_module.addImport("primitives", primitives_module);
     cheatcode_inspector_exe.root_module.addImport("bytecode", bytecode_module);
     cheatcode_inspector_exe.root_module.addImport("state", state_module);
