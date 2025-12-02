@@ -402,7 +402,6 @@ pub const Precompiles = struct {
     }
 };
 
-
 // Import test module
 pub const tests = @import("tests.zig");
 
