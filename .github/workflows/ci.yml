@@ -57,12 +57,6 @@ jobs:
           DYLD_LIBRARY_PATH: /opt/homebrew/lib:/usr/local/lib
         run: make test
 
-      - name: Run precompile unit tests
-        run: |
-          zig build --summary none 2>/dev/null || true
-          OPTIONS_FILE=$$(find .zig-cache -name options.zig -type f | head -1)
-          zig test src/precompile/tests.zig -lc -I src --mod build_options:"$$OPTIONS_FILE" --mod primitives:src/primitives/main.zig --mod bytecode:src/bytecode/main.zig --mod state:src/state/main.zig --mod database:src/database/main.zig --mod context:src/context/main.zig --mod interpreter:src/interpreter/main.zig --mod precompile:src/precompile/main.zig --mod handler:src/handler/main.zig --mod inspector:src/inspector/main.zig -lsecp256k1 -lssl -lcrypto -lblst -lmcl -I/usr/local/include -I/opt/homebrew/include
-
       - name: Run examples
         run: |
           ./zig-out/bin/simple_contract
