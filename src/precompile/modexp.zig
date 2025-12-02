@@ -113,9 +113,12 @@ fn berlinGasCalc(base_len: u64, exp_len: u64, mod_len: u64, exp_highp: primitive
     return 200 + @as(u64, @intCast(complexity * iteration_count / 3));
 }
 
-/// Calculate gas cost for Osaka (EIP-7823)
+/// Calculate gas cost for Osaka (EIP-7823 and EIP-7883)
+/// Formula: max(500, complexity * iteration_count)
+/// where complexity is based on max(base_len, mod_len), not exp_len
 fn osakaGasCalc(base_len: u64, exp_len: u64, mod_len: u64, exp_highp: primitives.U256) u64 {
-    const max_len = @max(@max(base_len, exp_len), mod_len);
+    // Use max(base_len, mod_len) for complexity, not exp_len
+    const max_len = @max(base_len, mod_len);
     const iteration_count = calculateIterationCount(exp_len, exp_highp, 16);
 
     var complexity: u64 = 0;
@@ -126,7 +129,8 @@ fn osakaGasCalc(base_len: u64, exp_len: u64, mod_len: u64, exp_highp: primitives
         complexity = 2 * words * words;
     }
 
-    return 500 + @as(u64, @intCast(complexity * iteration_count));
+    const gas = complexity * iteration_count;
+    return @max(@as(u64, @intCast(500)), gas);
 }
 
 /// Run modexp with specific gas calculation
@@ -155,8 +159,8 @@ fn runInner(
     const exp_len_u256 = extractU256(&exp_len_bytes);
     const mod_len_u256 = extractU256(&mod_len_bytes);
 
-    // Check EIP-7823 limits for Osaka
-    const EIP7823_LIMIT: u64 = 32768;
+    // Check EIP-7823 limits for Osaka (1024 bytes per parameter)
+    const EIP7823_LIMIT: u64 = 1024;
     if (is_osaka) {
         if (base_len_u256 > EIP7823_LIMIT or exp_len_u256 > EIP7823_LIMIT or mod_len_u256 > EIP7823_LIMIT) {
             return main.PrecompileResult{ .err = main.PrecompileError.ModexpEip7823LimitSize };

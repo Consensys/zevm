@@ -1,6 +1,17 @@
 const std = @import("std");
 const primitives = @import("primitives");
 
+// Import precompile modules (needed for PrecompileId.precompile method)
+pub const identity = @import("identity.zig");
+pub const hash = @import("hash.zig");
+pub const secp256k1 = @import("secp256k1.zig");
+pub const secp256r1 = @import("secp256r1.zig");
+pub const modexp = @import("modexp.zig");
+pub const bn254 = @import("bn254.zig");
+pub const blake2 = @import("blake2.zig");
+pub const kzg_point_evaluation = @import("kzg_point_evaluation.zig");
+pub const bls12_381 = @import("bls12_381.zig");
+
 /// Precompile error type
 pub const PrecompileError = error{
     OutOfGas,
@@ -71,7 +82,7 @@ pub const PrecompileOutput = struct {
 pub const PrecompileFn = *const fn (input: []const u8, gas_limit: u64) PrecompileResult;
 
 /// Precompile identifier
-pub const PrecompileId = enum {
+pub const PrecompileId = union(enum) {
     /// Elliptic curve digital signature algorithm (ECDSA) public key recovery function.
     EcRec,
     /// SHA2-256 hash function.
@@ -108,6 +119,88 @@ pub const PrecompileId = enum {
     Bls12MapFp2ToGp2,
     /// ECDSA signature verification over the secp256r1 elliptic curve.
     P256Verify,
+    /// Custom precompile identifier.
+    Custom: []const u8,
+
+    /// Create new custom precompile ID.
+    pub fn custom(id: []const u8) PrecompileId {
+        return PrecompileId{ .Custom = id };
+    }
+
+    /// Returns the name of the precompile as defined in EIP-7910.
+    pub fn name(self: PrecompileId) []const u8 {
+        return switch (self) {
+            .EcRec => "ECREC",
+            .Sha256 => "SHA256",
+            .Ripemd160 => "RIPEMD160",
+            .Identity => "ID",
+            .ModExp => "MODEXP",
+            .Bn254Add => "BN254_ADD",
+            .Bn254Mul => "BN254_MUL",
+            .Bn254Pairing => "BN254_PAIRING",
+            .Blake2F => "BLAKE2F",
+            .KzgPointEvaluation => "KZG_POINT_EVALUATION",
+            .Bls12G1Add => "BLS12_G1ADD",
+            .Bls12G1Msm => "BLS12_G1MSM",
+            .Bls12G2Add => "BLS12_G2ADD",
+            .Bls12G2Msm => "BLS12_G2MSM",
+            .Bls12Pairing => "BLS12_PAIRING_CHECK",
+            .Bls12MapFpToGp1 => "BLS12_MAP_FP_TO_G1",
+            .Bls12MapFp2ToGp2 => "BLS12_MAP_FP2_TO_G2",
+            .P256Verify => "P256VERIFY",
+            .Custom => |id| id,
+        };
+    }
+
+    /// Returns the precompile function for the given spec.
+    ///
+    /// If case of Custom it will return null.
+    ///
+    /// For case where precompile was still not introduced in the spec,
+    /// it will return the fork closest to activation.
+    pub fn precompile(self: PrecompileId, spec: PrecompileSpecId) ?Precompile {
+        return switch (self) {
+            .EcRec => secp256k1.ECRECOVER,
+            .Sha256 => hash.SHA256,
+            .Ripemd160 => hash.RIPEMD160,
+            .Identity => identity.FUN,
+            .ModExp => blk: {
+                // ModExp changes gas calculation based on spec
+                const mod_exp_precompile: Precompile = if (@intFromEnum(spec) < @intFromEnum(PrecompileSpecId.Berlin)) modexp.BYZANTIUM else if (@intFromEnum(spec) < @intFromEnum(PrecompileSpecId.Osaka)) modexp.BERLIN else modexp.OSAKA;
+                break :blk mod_exp_precompile;
+            },
+            .Bn254Add => blk: {
+                // BN254 add - gas cost changes in Istanbul
+                const bn254_add_precompile: Precompile = if (@intFromEnum(spec) < @intFromEnum(PrecompileSpecId.Istanbul)) bn254.add.BYZANTIUM else bn254.add.ISTANBUL;
+                break :blk bn254_add_precompile;
+            },
+            .Bn254Mul => blk: {
+                // BN254 mul - gas cost changes in Istanbul
+                const bn254_mul_precompile: Precompile = if (@intFromEnum(spec) < @intFromEnum(PrecompileSpecId.Istanbul)) bn254.mul.BYZANTIUM else bn254.mul.ISTANBUL;
+                break :blk bn254_mul_precompile;
+            },
+            .Bn254Pairing => blk: {
+                // BN254 pairing - gas cost changes in Istanbul
+                const bn254_pair_precompile: Precompile = if (@intFromEnum(spec) < @intFromEnum(PrecompileSpecId.Istanbul)) bn254.pair.BYZANTIUM else bn254.pair.ISTANBUL;
+                break :blk bn254_pair_precompile;
+            },
+            .Blake2F => blake2.FUN,
+            .KzgPointEvaluation => kzg_point_evaluation.POINT_EVALUATION,
+            .Bls12G1Add => bls12_381.g1_add.PRECOMPILE,
+            .Bls12G1Msm => bls12_381.g1_msm.PRECOMPILE,
+            .Bls12G2Add => bls12_381.g2_add.PRECOMPILE,
+            .Bls12G2Msm => bls12_381.g2_msm.PRECOMPILE,
+            .Bls12Pairing => bls12_381.pairing.PRECOMPILE,
+            .Bls12MapFpToGp1 => bls12_381.map_fp_to_g1.PRECOMPILE,
+            .Bls12MapFp2ToGp2 => bls12_381.map_fp2_to_g2.PRECOMPILE,
+            .P256Verify => blk: {
+                // P256 verify - gas cost changes in Osaka
+                const p256_precompile: Precompile = if (@intFromEnum(spec) < @intFromEnum(PrecompileSpecId.Osaka)) secp256r1.P256VERIFY else secp256r1.P256VERIFY_OSAKA;
+                break :blk p256_precompile;
+            },
+            .Custom => return null,
+        };
+    }
 };
 
 /// Precompile specification ID
@@ -309,16 +402,6 @@ pub const Precompiles = struct {
     }
 };
 
-// Import precompile modules
-pub const identity = @import("identity.zig");
-pub const hash = @import("hash.zig");
-pub const secp256k1 = @import("secp256k1.zig");
-pub const secp256r1 = @import("secp256r1.zig");
-pub const modexp = @import("modexp.zig");
-pub const bn254 = @import("bn254.zig");
-pub const blake2 = @import("blake2.zig");
-pub const kzg_point_evaluation = @import("kzg_point_evaluation.zig");
-pub const bls12_381 = @import("bls12_381.zig");
 
 // Import test module
 pub const tests = @import("tests.zig");

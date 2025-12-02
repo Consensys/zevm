@@ -25,7 +25,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - Nothing yet
 
-## [0.3.0] - 2025-12-20
+## [0.3.1] - 2025-12-02
+
+### Added
+- **PrecompileId.Custom variant**: Added support for custom precompile identifiers via `PrecompileId.custom("id")`
+- **PrecompileId.name() method**: Returns EIP-7910 standardized names for all precompiles (e.g., "SHA256", "BN254_ADD")
+- **PrecompileId.precompile() method**: Convenience method to get the appropriate precompile implementation for a given spec, handling spec-specific variants automatically
+
+### Fixed
+- **ModExp Osaka gas calculation**: Fixed gas calculation formula to use `max(500, complexity * iteration_count)` instead of `500 + complexity * iteration_count` to match EIP-7883 specification
+- **ModExp Osaka complexity calculation**: Fixed to use `max(base_len, mod_len)` instead of `max(base_len, exp_len, mod_len)` for complexity calculation
+- **EIP-7823 input size limit**: Corrected ModExp input size limit from 32768 bytes to 1024 bytes per parameter as specified in EIP-7823
+
+### Changed
+- **PrecompileId type**: Changed from `enum` to `union(enum)` to support Custom variant while maintaining backward compatibility with all existing precompile IDs
+
+## [0.3.0] - 2025-12-01
 
 ### Added
 - **Cross-Platform Makefile**: Comprehensive build system with OS detection and automated dependency installation
