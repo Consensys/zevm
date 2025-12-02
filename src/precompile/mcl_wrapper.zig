@@ -58,9 +58,9 @@ var mcl_init_done: bool = false;
 fn initMcl() void {
     mcl_initialized.lock();
     defer mcl_initialized.unlock();
-    
+
     if (mcl_init_done) return;
-    
+
     if (build_options.enable_mcl) {
         // Initialize mcl with BN254 curve (curve type 1 = BN_SNARK1)
         // Enable ETH serialization (big-endian) to match Ethereum format
@@ -89,33 +89,33 @@ pub fn g1Add(a: [64]u8, b: [64]u8) ![64]u8 {
     // Deserialize G1 points from big-endian bytes
     var p1: c.mclBnG1 = undefined;
     var p2: c.mclBnG1 = undefined;
-    
+
     const p1_size = c.mclBnG1_deserialize(&p1, &a, 64);
     if (p1_size == 0) {
         return error.InvalidG1Point;
     }
-    
+
     const p2_size = c.mclBnG1_deserialize(&p2, &b, 64);
     if (p2_size == 0) {
         return error.InvalidG1Point;
     }
-    
+
     // Validate points are on curve
     if (c.mclBnG1_isValid(&p1) == 0 or c.mclBnG1_isValid(&p2) == 0) {
         return error.InvalidG1Point;
     }
-    
+
     // Perform addition
     var result: c.mclBnG1 = undefined;
     c.mclBnG1_add(&result, &p1, &p2);
-    
+
     // Serialize result to big-endian bytes
     var output: [64]u8 = undefined;
     const output_size = c.mclBnG1_serialize(&output, 64, &result);
     if (output_size == 0) {
         return error.InvalidG1Point;
     }
-    
+
     return output;
 }
 
@@ -135,30 +135,30 @@ pub fn g1Mul(point: [64]u8, scalar: [32]u8) ![64]u8 {
     if (p_size == 0) {
         return error.InvalidG1Point;
     }
-    
+
     // Validate point is on curve
     if (c.mclBnG1_isValid(&p) == 0) {
         return error.InvalidG1Point;
     }
-    
+
     // Deserialize scalar from big-endian bytes
     var s: c.mclBnFr = undefined;
     const s_size = c.mclBnFr_deserialize(&s, &scalar, 32);
     if (s_size == 0) {
         return error.InvalidInput;
     }
-    
+
     // Perform scalar multiplication
     var result: c.mclBnG1 = undefined;
     c.mclBnG1_mul(&result, &p, &s);
-    
+
     // Serialize result to big-endian bytes
     var output: [64]u8 = undefined;
     const output_size = c.mclBnG1_serialize(&output, 64, &result);
     if (output_size == 0) {
         return error.InvalidG1Point;
     }
-    
+
     return output;
 }
 
@@ -188,23 +188,23 @@ pub fn pairingCheck(pairs: []const struct { g1: [64]u8, g2: [128]u8 }) !bool {
         if (g1_size == 0) {
             return error.InvalidG1Point;
         }
-        
+
         // Deserialize G2 point
         var g2: c.mclBnG2 = undefined;
         const g2_size = c.mclBnG2_deserialize(&g2, &pair.g2, 128);
         if (g2_size == 0) {
             return error.InvalidG2Point;
         }
-        
+
         // Validate points are on curve
         if (c.mclBnG1_isValid(&g1) == 0 or c.mclBnG2_isValid(&g2) == 0) {
             return error.InvalidInput;
         }
-        
+
         // Compute pairing for this pair
         var temp_gt: c.mclBnGT = undefined;
         c.mclBn_pairing(&temp_gt, &g1, &g2);
-        
+
         // Multiply into result (accumulate product)
         var new_result: c.mclBnGT = undefined;
         c.mclBnGT_mul(&new_result, &gt_result, &temp_gt);

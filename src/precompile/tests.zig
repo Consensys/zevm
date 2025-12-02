@@ -1434,11 +1434,11 @@ test "BN254 Add - real test vector: generator + generator" {
     // This is a well-known point on the curve
     var input: [128]u8 = undefined;
     @memset(&input, 0);
-    
+
     // First point: generator (1, 2)
     input[31] = 0x01; // x = 1
     input[63] = 0x02; // y = 2
-    
+
     // Second point: generator (1, 2)
     input[95] = 0x01; // x = 1
     input[127] = 0x02; // y = 2
@@ -1470,14 +1470,14 @@ test "BN254 Add - commutativity: P1 + P2 == P2 + P1" {
     var input2: [128]u8 = undefined;
     @memset(&input1, 0);
     @memset(&input2, 0);
-    
+
     // P1: (1, 2)
     input1[31] = 0x01;
     input1[63] = 0x02;
     // P2: (3, 4)
     input1[95] = 0x03;
     input1[127] = 0x04;
-    
+
     // P2: (3, 4)
     input2[31] = 0x03;
     input2[63] = 0x04;
@@ -1491,7 +1491,7 @@ test "BN254 Add - commutativity: P1 + P2 == P2 + P1" {
 
     try testing.expect(result1 == .success);
     try testing.expect(result2 == .success);
-    
+
     // Results should be equal (commutativity)
     try testing.expect(std.mem.eql(u8, result1.success.bytes, result2.success.bytes));
 }
@@ -1499,7 +1499,7 @@ test "BN254 Add - commutativity: P1 + P2 == P2 + P1" {
 test "BN254 Add - identity element: P + 0 == P" {
     var input: [128]u8 = undefined;
     @memset(&input, 0);
-    
+
     // P: (1, 2)
     input[31] = 0x01;
     input[63] = 0x02;
@@ -1519,7 +1519,7 @@ test "BN254 Add - identity element: P + 0 == P" {
 test "BN254 Mul - real test vector: generator * 2" {
     var input: [96]u8 = undefined;
     @memset(&input, 0);
-    
+
     // Point: generator (1, 2)
     input[31] = 0x01;
     input[63] = 0x02;
@@ -1539,7 +1539,7 @@ test "BN254 Mul - real test vector: generator * 2" {
 test "BN254 Mul - scalar zero: P * 0 == identity" {
     var input: [96]u8 = undefined;
     @memset(&input, 0);
-    
+
     // Point: generator (1, 2)
     input[31] = 0x01;
     input[63] = 0x02;
@@ -1566,7 +1566,7 @@ test "BN254 Mul - scalar zero: P * 0 == identity" {
 test "BN254 Mul - scalar one: P * 1 == P" {
     var input: [96]u8 = undefined;
     @memset(&input, 0);
-    
+
     // Point: generator (1, 2)
     input[31] = 0x01;
     input[63] = 0x02;
@@ -1586,7 +1586,7 @@ test "BN254 Mul - scalar one: P * 1 == P" {
 test "BN254 Mul - large scalar multiplication" {
     var input: [96]u8 = undefined;
     @memset(&input, 0);
-    
+
     // Point: generator (1, 2)
     input[31] = 0x01;
     input[63] = 0x02;
@@ -1607,11 +1607,11 @@ test "BN254 Pairing - real test vector: e(G1, G2) == 1" {
     // Pairing of generator points should equal 1 (identity in GT)
     var input: [192]u8 = undefined;
     @memset(&input, 0);
-    
+
     // G1: generator (1, 2) - 64 bytes
     input[31] = 0x01;
     input[63] = 0x02;
-    
+
     // G2: generator - 128 bytes
     // G2 generator coordinates are more complex, use a known valid point
     // For now, test with identity pairing which should be 1
@@ -1635,7 +1635,7 @@ test "BN254 Pairing - bilinearity: e(a*G1, b*G2) == e(G1, G2)^(a*b)" {
     // For simplicity, test with identity points
     var input: [192]u8 = undefined;
     @memset(&input, 0);
-    
+
     // Both points are identity
     // e(0, 0) = 1
 
@@ -1652,7 +1652,7 @@ test "BN254 Pairing - multiple pairs: product of pairings" {
     // Test with 2 pairs
     var input: [384]u8 = undefined;
     @memset(&input, 0);
-    
+
     // First pair: both identity
     // Second pair: both identity
     // Product: 1 * 1 = 1
@@ -1673,7 +1673,7 @@ test "BN254 Pairing - invalid G1 point" {
     // Test with invalid G1 point (not on curve)
     var input: [192]u8 = undefined;
     @memset(&input, 0xFF); // All 0xFF is likely invalid
-    
+
     // Set G2 to identity
     @memset(input[64..192], 0);
 
@@ -1691,7 +1691,7 @@ test "BN254 Pairing - invalid G2 point" {
     // Test with invalid G2 point (not on curve)
     var input: [192]u8 = undefined;
     @memset(&input, 0);
-    
+
     // G1 is identity
     // G2 is invalid (all 0xFF)
     @memset(input[64..192], 0xFF);
@@ -1718,7 +1718,7 @@ test "BN254 Add - Byzantium vs Istanbul gas costs" {
 
     try testing.expect(byz_result == .success);
     try testing.expect(ist_result == .success);
-    
+
     // Istanbul should use less gas
     try testing.expect(ist_result.success.gas_used < byz_result.success.gas_used);
     try testing.expect(byz_result.success.gas_used == 500);
@@ -1738,7 +1738,7 @@ test "BN254 Mul - Byzantium vs Istanbul gas costs" {
 
     try testing.expect(byz_result == .success);
     try testing.expect(ist_result == .success);
-    
+
     // Istanbul should use less gas
     try testing.expect(ist_result.success.gas_used < byz_result.success.gas_used);
     try testing.expect(byz_result.success.gas_used == 40000);
@@ -1755,7 +1755,7 @@ test "BN254 Pairing - Byzantium vs Istanbul gas costs" {
 
     try testing.expect(byz_result == .success);
     try testing.expect(ist_result == .success);
-    
+
     // Istanbul should use less gas
     try testing.expect(ist_result.success.gas_used < byz_result.success.gas_used);
     const byz_gas = bn254.pair.BYZANTIUM_PAIR_PER_POINT + bn254.pair.BYZANTIUM_PAIR_BASE;
