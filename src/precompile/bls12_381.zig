@@ -218,21 +218,21 @@ pub fn bls12G1MsmRun(input: []const u8, gas_limit: u64) main.PrecompileResult {
     while (i < input.len) : (i += PADDED_G1_LENGTH + PADDED_FP_LENGTH) {
         const point_padded = input[i..][0..PADDED_G1_LENGTH];
         const scalar_padded = input[i + PADDED_G1_LENGTH ..][0..PADDED_FP_LENGTH];
-        
+
         // Remove padding from point (128 bytes -> 96 bytes)
         const point_coords = removeG1Padding(point_padded) catch {
             return main.PrecompileResult{ .err = main.PrecompileError.Bls12381G1MsmInputLength };
         };
-        
+
         // Flatten point coords to [96]u8
         var point: [G1_LENGTH]u8 = undefined;
         @memcpy(point[0..48], &point_coords[0]);
         @memcpy(point[48..96], &point_coords[1]);
-        
+
         // Extract scalar (skip 16-byte padding, take 32 bytes)
         var scalar: [32]u8 = undefined;
         @memcpy(&scalar, scalar_padded[16..48]);
-        
+
         pairs.append(std.heap.c_allocator, .{ .point = point, .scalar = scalar }) catch {
             return main.PrecompileResult{ .err = main.PrecompileError.OutOfGas };
         };
@@ -250,7 +250,7 @@ pub fn bls12G1MsmRun(input: []const u8, gas_limit: u64) main.PrecompileResult {
             blst_pairs[idx].point = pair_item.point;
             blst_pairs[idx].scalar = pair_item.scalar;
         }
-        
+
         if (blst_wrapper.g1Msm(@ptrCast(blst_pairs))) |result| {
             unpadded_result = result;
         } else |_| {
@@ -285,7 +285,7 @@ pub fn bls12G2AddRun(input: []const u8, gas_limit: u64) main.PrecompileResult {
     @memcpy(a_unpadded[48..96], &a_coords[1]);
     @memcpy(a_unpadded[96..144], &a_coords[2]);
     @memcpy(a_unpadded[144..192], &a_coords[3]);
-    
+
     var b_unpadded: [G2_LENGTH]u8 = undefined;
     @memcpy(b_unpadded[0..48], &b_coords[0]);
     @memcpy(b_unpadded[48..96], &b_coords[1]);
@@ -337,23 +337,23 @@ pub fn bls12G2MsmRun(input: []const u8, gas_limit: u64) main.PrecompileResult {
     while (i < input.len) : (i += PADDED_G2_LENGTH + PADDED_FP_LENGTH) {
         const point_padded = input[i..][0..PADDED_G2_LENGTH];
         const scalar_padded = input[i + PADDED_G2_LENGTH ..][0..PADDED_FP_LENGTH];
-        
+
         // Remove padding from point (256 bytes -> 192 bytes)
         const point_coords = removeG2Padding(point_padded) catch {
             return main.PrecompileResult{ .err = main.PrecompileError.Bls12381G2MsmInputLength };
         };
-        
+
         // Flatten point coords to [192]u8
         var point: [G2_LENGTH]u8 = undefined;
         @memcpy(point[0..48], &point_coords[0]);
         @memcpy(point[48..96], &point_coords[1]);
         @memcpy(point[96..144], &point_coords[2]);
         @memcpy(point[144..192], &point_coords[3]);
-        
+
         // Extract scalar (skip 16-byte padding, take 32 bytes)
         var scalar: [32]u8 = undefined;
         @memcpy(&scalar, scalar_padded[16..48]);
-        
+
         pairs.append(std.heap.c_allocator, .{ .point = point, .scalar = scalar }) catch {
             return main.PrecompileResult{ .err = main.PrecompileError.OutOfGas };
         };
@@ -371,7 +371,7 @@ pub fn bls12G2MsmRun(input: []const u8, gas_limit: u64) main.PrecompileResult {
             blst_pairs[idx].point = pair_item.point;
             blst_pairs[idx].scalar = pair_item.scalar;
         }
-        
+
         if (blst_wrapper.g2Msm(@ptrCast(blst_pairs))) |result| {
             unpadded_result = result;
         } else |_| {
@@ -415,7 +415,7 @@ pub fn bls12PairingRun(input: []const u8, gas_limit: u64) main.PrecompileResult 
     while (i < input.len) : (i += pair_len) {
         const g1_padded = input[i..][0..PADDED_G1_LENGTH];
         const g2_padded = input[i + PADDED_G1_LENGTH ..][0..PADDED_G2_LENGTH];
-        
+
         // Remove padding from G1 point
         const g1_coords = removeG1Padding(g1_padded) catch {
             return main.PrecompileResult{ .err = main.PrecompileError.Bls12381PairingInputLength };
@@ -423,7 +423,7 @@ pub fn bls12PairingRun(input: []const u8, gas_limit: u64) main.PrecompileResult 
         var g1: [G1_LENGTH]u8 = undefined;
         @memcpy(g1[0..48], &g1_coords[0]);
         @memcpy(g1[48..96], &g1_coords[1]);
-        
+
         // Remove padding from G2 point
         const g2_coords = removeG2Padding(g2_padded) catch {
             return main.PrecompileResult{ .err = main.PrecompileError.Bls12381PairingInputLength };
@@ -433,7 +433,7 @@ pub fn bls12PairingRun(input: []const u8, gas_limit: u64) main.PrecompileResult 
         @memcpy(g2[48..96], &g2_coords[1]);
         @memcpy(g2[96..144], &g2_coords[2]);
         @memcpy(g2[144..192], &g2_coords[3]);
-        
+
         pairs.append(std.heap.c_allocator, .{ .g1 = g1, .g2 = g2 }) catch {
             return main.PrecompileResult{ .err = main.PrecompileError.OutOfGas };
         };
@@ -451,7 +451,7 @@ pub fn bls12PairingRun(input: []const u8, gas_limit: u64) main.PrecompileResult 
             blst_pairs[idx].g1 = pair_item.g1;
             blst_pairs[idx].g2 = pair_item.g2;
         }
-        
+
         if (blst_wrapper.pairingCheck(@ptrCast(blst_pairs))) |result| {
             pairing_valid = result;
         } else |_| {
@@ -517,8 +517,8 @@ pub fn bls12MapFp2ToG2Run(input: []const u8, gas_limit: u64) main.PrecompileResu
     // Extract Fp2 element (skip 16-byte padding from first element, take 96 bytes total)
     // Fp2 is two Fp elements: [padding(16) | fp0(48) | padding(16) | fp1(48)]
     var fp2: [FP2_LENGTH]u8 = undefined;
-    @memcpy(fp2[0..48], input[16..64]);      // First Fp element
-    @memcpy(fp2[48..96], input[80..128]);    // Second Fp element
+    @memcpy(fp2[0..48], input[16..64]); // First Fp element
+    @memcpy(fp2[48..96], input[80..128]); // Second Fp element
 
     // Map to G2 using blst wrapper
     var unpadded_result: [G2_LENGTH]u8 = undefined;

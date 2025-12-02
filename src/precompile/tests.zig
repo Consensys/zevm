@@ -786,7 +786,6 @@ test "BN254 Pairing precompile - Byzantium gas cost" {
     try testing.expect(output.gas_used == 180000); // Byzantium cost is much higher
 }
 
-
 test "BLS12-381 G1 MSM - multiple points" {
     // 3 points: 3 * (128 + 64) = 576 bytes
     var input: [576]u8 = undefined;
@@ -802,8 +801,6 @@ test "BLS12-381 G1 MSM - multiple points" {
     try testing.expect(output.bytes.len == 128);
 }
 
-
-
 test "BLS12-381 G1 MSM - invalid input length" {
     // Invalid length (not a multiple of point+scalar size)
     var input: [200]u8 = undefined;
@@ -816,9 +813,6 @@ test "BLS12-381 G1 MSM - invalid input length" {
     // But may have issues with parsing
     _ = result;
 }
-
-
-
 
 test "BLS12-381 MapFpToG1 - out of gas" {
     var input: [64]u8 = undefined;
@@ -944,14 +938,14 @@ test "BLS12-381 G1 Add - known test vector" {
     // Point 1: Generator point (compressed form)
     var input: [256]u8 = undefined;
     @memset(&input, 0);
-    
+
     // Set first point (padded G1 format: 128 bytes)
     // x coordinate at offset 16-64, y coordinate at offset 80-128
     input[16] = 0x17; // Sample x coordinate
     input[17] = 0xF1;
     input[80] = 0x08; // Sample y coordinate
     input[81] = 0xB3;
-    
+
     // Second point is zero (identity)
     // Already zero from memset
 
@@ -988,7 +982,7 @@ test "BLS12-381 G1 MSM - single point scalar multiplication" {
     // 1 point (128 bytes) + 1 scalar (64 bytes) = 192 bytes
     var input: [192]u8 = undefined;
     @memset(&input, 0);
-    
+
     // Set scalar to 1 (big-endian, at offset 128+16 = 144)
     input[159] = 1; // Last byte of scalar
 
@@ -1006,7 +1000,7 @@ test "BLS12-381 G1 MSM - multiple points with discount" {
     // 5 points: 5 * (128 + 64) = 960 bytes
     var input: [960]u8 = undefined;
     @memset(&input, 0);
-    
+
     // Set scalars to various values
     var i: usize = 0;
     while (i < 5) : (i += 1) {
@@ -1077,7 +1071,7 @@ test "BLS12-381 G2 Add - identity point addition" {
 test "BLS12-381 G2 Add - known test vector" {
     var input: [512]u8 = undefined;
     @memset(&input, 0);
-    
+
     // Set first point coordinates
     input[16] = 0x13; // x.c0
     input[80] = 0xE9; // x.c1
@@ -1293,13 +1287,13 @@ test "BN254 Add - identity point addition" {
 test "BN254 Add - generator point addition" {
     var input: [128]u8 = undefined;
     @memset(&input, 0);
-    
+
     // Set first point (generator)
     input[0] = 0x01;
     input[31] = 0x01;
     input[32] = 0x02;
     input[63] = 0x02;
-    
+
     // Second point is identity
 
     const bn254 = @import("bn254.zig");
@@ -1438,16 +1432,16 @@ test "BN254 Pairing - invalid input length (not multiple of 192)" {
 test "KZG Point Evaluation - valid format with matching version" {
     var input: [192]u8 = undefined;
     @memset(&input, 0);
-    
+
     // Create a valid commitment
     var commitment: [48]u8 = undefined;
     @memset(&commitment, 0x42);
-    
+
     // Compute versioned hash
     var computed_hash: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(&commitment, &computed_hash, .{});
     computed_hash[0] = 0x01; // Set version
-    
+
     // Set input
     @memcpy(input[0..32], &computed_hash); // versioned_hash
     // z, y, commitment, proof remain zero (will fail verification but format is valid)
@@ -1463,14 +1457,14 @@ test "KZG Point Evaluation - valid format with matching version" {
 test "KZG Point Evaluation - version mismatch" {
     var input: [192]u8 = undefined;
     @memset(&input, 0);
-    
+
     var commitment: [48]u8 = undefined;
     @memset(&commitment, 0x42);
-    
+
     var computed_hash: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(&commitment, &computed_hash, .{});
     computed_hash[0] = 0x02; // Wrong version
-    
+
     @memcpy(input[0..32], &computed_hash);
     @memcpy(input[96..144], &commitment);
 
@@ -1506,7 +1500,7 @@ test "KZG Point Evaluation - return value format" {
     // Note: This will fail without valid proof, but we can check the return value structure
     var input: [192]u8 = undefined;
     @memset(&input, 0);
-    
+
     // Set up valid versioned hash
     var commitment: [48]u8 = undefined;
     @memset(&commitment, 0x01);
@@ -1515,7 +1509,7 @@ test "KZG Point Evaluation - return value format" {
     versioned_hash[0] = 0x01;
     @memcpy(input[0..32], &versioned_hash);
     @memcpy(input[96..144], &commitment);
-    
+
     // With invalid proof, should fail verification
     const kzg = @import("kzg_point_evaluation.zig");
     const result = kzg.kzgPointEvaluationRun(&input, 100000);
@@ -1546,7 +1540,7 @@ test "KZG Point Evaluation - gas cost verification" {
 test "KZG Point Evaluation - zero commitment" {
     var input: [192]u8 = undefined;
     @memset(&input, 0);
-    
+
     // Zero commitment
     var versioned_hash: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(input[96..144], &versioned_hash, .{});
@@ -1618,29 +1612,29 @@ test "All precompiles - gas limit boundary conditions" {
     const bls12_381 = @import("bls12_381.zig");
     const bn254 = @import("bn254.zig");
     const kzg = @import("kzg_point_evaluation.zig");
-    
+
     // G1 Add: exact gas
     var g1_input: [256]u8 = undefined;
     @memset(&g1_input, 0);
     const g1_result = bls12_381.bls12G1AddRun(&g1_input, 375);
     try testing.expect(g1_result == .success);
-    
+
     // G1 Add: one less than required
     const g1_result_low = bls12_381.bls12G1AddRun(&g1_input, 374);
     try testing.expect(g1_result_low == .err);
     try testing.expect(g1_result_low.err == main.PrecompileError.OutOfGas);
-    
+
     // BN254 Add Istanbul: exact gas
     var bn_input: [128]u8 = undefined;
     @memset(&bn_input, 0);
     const bn_result = bn254.add.ISTANBUL.execute(&bn_input, 150);
     try testing.expect(bn_result == .success);
-    
+
     // BN254 Add Istanbul: one less than required
     const bn_result_low = bn254.add.ISTANBUL.execute(&bn_input, 149);
     try testing.expect(bn_result_low == .err);
     try testing.expect(bn_result_low.err == main.PrecompileError.OutOfGas);
-    
+
     // KZG: exact gas
     var kzg_input: [192]u8 = undefined;
     @memset(&kzg_input, 0);
@@ -1649,7 +1643,7 @@ test "All precompiles - gas limit boundary conditions" {
     if (kzg_result == .err and kzg_result.err == main.PrecompileError.OutOfGas) {
         try testing.expect(true);
     }
-    
+
     // KZG: one less than required
     const kzg_result_low = kzg.kzgPointEvaluationRun(&kzg_input, 49999);
     try testing.expect(kzg_result_low == .err);

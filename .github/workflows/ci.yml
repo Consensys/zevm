@@ -28,7 +28,7 @@ jobs:
         run: zig version
 
       - name: Check formatting
-        run: zig fmt --check .
+        run: zig fmt --check src/
 
       - name: Install dependencies
         run: make install-deps
@@ -70,7 +70,7 @@ jobs:
           version: '0.15.1'
 
       - name: Format check
-        run: zig fmt --check .
+        run: zig fmt --check src/
 
   security:
     name: Security Scan

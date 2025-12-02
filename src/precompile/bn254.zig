@@ -191,12 +191,12 @@ fn runPairing(input: []const u8, pair_per_point_cost: u64, pair_base_cost: u64, 
     while (i < input.len) : (i += PAIR_ELEMENT_LEN) {
         const g1_bytes = input[i..][0..G1_LEN];
         const g2_bytes = input[i + G1_LEN ..][0..G2_LEN];
-        
+
         // Validate points
         if (!isValidG1Point(g1_bytes) or !isValidG2Point(g2_bytes)) {
             return main.PrecompileResult{ .err = main.PrecompileError.Bn254FieldPointNotAMember };
         }
-        
+
         const g1: [G1_LEN]u8 = g1_bytes[0..G1_LEN].*;
         const g2: [G2_LEN]u8 = g2_bytes[0..G2_LEN].*;
         pairs.append(std.heap.c_allocator, .{ .g1 = g1, .g2 = g2 }) catch {
@@ -216,7 +216,7 @@ fn runPairing(input: []const u8, pair_per_point_cost: u64, pair_base_cost: u64, 
             mcl_pairs[idx].g1 = pair_item.g1;
             mcl_pairs[idx].g2 = pair_item.g2;
         }
-        
+
         if (mcl_wrapper.pairingCheck(@ptrCast(mcl_pairs))) |result| {
             pairing_valid = result;
         } else |_| {

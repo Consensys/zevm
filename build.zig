@@ -16,7 +16,7 @@ pub fn build(b: *std.Build) void {
     const enable_mcl = b.option(bool, "mcl", "Enable mcl library for BN254 operations") orelse true;
 
     // Platform-specific default include paths
-    // Note: Users should override these with -Dblst-include=... or -Dmcl-include=... 
+    // Note: Users should override these with -Dblst-include=... or -Dmcl-include=...
     // if libraries are installed in non-standard locations
     const default_include_path = if (is_windows)
         "C:/Program Files" // Windows default (users should override)
