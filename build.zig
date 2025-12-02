@@ -66,7 +66,7 @@ pub fn build(b: *std.Build) void {
                 step.linkSystemLibrary("ssl");
                 step.linkSystemLibrary("crypto");
             }
-            
+
             // blst is required by default
             if (blst_enabled) {
                 // Try to link static library directly if available
@@ -74,7 +74,7 @@ pub fn build(b: *std.Build) void {
                     [_][]const u8{ "/opt/homebrew/lib/libblst.a", "/usr/local/lib/libblst.a" }
                 else
                     [_][]const u8{ "/usr/local/lib/libblst.a", "/usr/lib/libblst.a" };
-                
+
                 var found_blst_static = false;
                 for (blst_static_paths) |path| {
                     // Check if static library exists
@@ -85,12 +85,12 @@ pub fn build(b: *std.Build) void {
                     found_blst_static = true;
                     break;
                 }
-                
+
                 // Fall back to system library if static not found
                 if (!found_blst_static) {
                     step.linkSystemLibrary("blst");
                 }
-                
+
                 // Add include path for blst headers
                 // For absolute paths, we need to handle them specially
                 // The issue is that cwd_relative doesn't work well with absolute paths
@@ -105,38 +105,58 @@ pub fn build(b: *std.Build) void {
             }
 
             if (mcl_enabled) {
+                // Link C++ standard library BEFORE static library on Linux
+                // libmcl.a was compiled with libstdc++ (GNU C++ library), not libc++
+                if (!is_macos) {
+                    // Linux: explicitly link libstdc++ BEFORE static library
+                    // This is critical - libmcl.a needs libstdc++ symbols
+                    step.linkSystemLibrary("stdc++");
+                }
+
                 // Try to link static library directly if available
                 const mcl_static_paths = if (is_macos)
                     [_][]const u8{ "/opt/homebrew/lib/libmcl.a", "/usr/local/lib/libmcl.a" }
                 else
                     [_][]const u8{ "/usr/local/lib/libmcl.a", "/usr/lib/libmcl.a" };
-                
+
                 var found_mcl_static = false;
                 for (mcl_static_paths) |path| {
                     // Check if static library exists
                     const file = std.fs.openFileAbsolute(path, .{}) catch continue;
                     file.close();
-                    // Link the static library directly
-                    step.addObjectFile(.{ .cwd_relative = path });
-                    found_mcl_static = true;
-                    break;
+                    // On Linux, addObjectFile() may trigger automatic linkLibCpp() which adds -lc++
+                    // But we need -lstdc++. So we'll use the library path approach instead
+                    if (is_macos) {
+                        // macOS: use addObjectFile() for static linking
+                        step.addObjectFile(.{ .cwd_relative = path });
+                        found_mcl_static = true;
+                        break;
+                    } else {
+                        // Linux: add library path and let linker find static library
+                        // This avoids automatic linkLibCpp() call
+                        const lib_dir = std.fs.path.dirname(path) orelse continue;
+                        step.addLibraryPath(.{ .cwd_relative = lib_dir });
+                        step.linkSystemLibrary("mcl");
+                        found_mcl_static = true;
+                        break;
+                    }
                 }
-                
+
                 // Fall back to system library if static not found
                 if (!found_mcl_static) {
                     step.linkSystemLibrary("mcl");
                 }
-                
+
                 // Link C++ standard library AFTER the static library
-                // On Linux, static libraries need the C++ runtime to be linked after them
-                // so the linker can resolve undefined symbols from the static library
+                // On macOS, use libc++
+                // On Linux, add libstdc++ again after static library to ensure symbols are resolved
                 if (is_macos) {
                     step.linkLibCpp(); // macOS uses libc++
                 } else {
-                    // Linux uses libstdc++
+                    // Linux: link libstdc++ AFTER static library to resolve undefined symbols
                     step.linkSystemLibrary("stdc++");
                 }
-                
+
                 // Use cwd_relative for absolute paths, or path for relative paths
                 if (std.fs.path.isAbsolute(mcl_inc)) {
                     step.root_module.addIncludePath(.{ .cwd_relative = mcl_inc });
