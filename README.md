@@ -69,6 +69,10 @@ ZEVM is a complete EVM implementation that provides:
 
 - Zig 0.15.1 or later
 - C compiler (for system libraries)
+- **blst library** (required, see [CROSS_PLATFORM.md](CROSS_PLATFORM.md) for installation)
+- **mcl library** (required, see [CROSS_PLATFORM.md](CROSS_PLATFORM.md) for installation)
+- **secp256k1** (required, typically available via package managers)
+- **OpenSSL** (required, typically available via package managers)
 
 ### Build Commands
 

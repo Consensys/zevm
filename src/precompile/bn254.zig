@@ -66,6 +66,9 @@ const ADD_INPUT_LEN: usize = 2 * G1_LEN; // 128 bytes
 const MUL_INPUT_LEN: usize = G1_LEN + SCALAR_LEN; // 96 bytes
 const PAIR_ELEMENT_LEN: usize = G1_LEN + G2_LEN; // 192 bytes
 
+// Pair type for pairing operations
+const G1G2Pair = struct { g1: [G1_LEN]u8, g2: [G2_LEN]u8 };
+
 /// Right pad input to specified length
 fn rightPad(comptime len: usize, input: []const u8) [len]u8 {
     var padded: [len]u8 = [_]u8{0} ** len;
@@ -93,11 +96,12 @@ fn runAdd(input: []const u8, gas_cost: u64, gas_limit: u64) main.PrecompileResul
     const p1_bytes: [G1_LEN]u8 = padded_input[0..G1_LEN].*;
     const p2_bytes: [G1_LEN]u8 = padded_input[G1_LEN..].*;
 
-    // Validate points
+    // Validate points (basic check - should be enhanced with proper curve validation)
     if (!isValidG1Point(&p1_bytes) or !isValidG1Point(&p2_bytes)) {
         return main.PrecompileResult{ .err = main.PrecompileError.Bn254FieldPointNotAMember };
     }
 
+    // Perform addition using mcl wrapper
     var output: [64]u8 = undefined;
     if (mcl_wrapper.isAvailable()) {
         if (mcl_wrapper.g1Add(p1_bytes, p2_bytes)) |result| {
@@ -133,11 +137,12 @@ fn runMul(input: []const u8, gas_cost: u64, gas_limit: u64) main.PrecompileResul
     const point_bytes: [G1_LEN]u8 = padded_input[0..G1_LEN].*;
     const scalar_bytes: [SCALAR_LEN]u8 = padded_input[G1_LEN..].*;
 
-    // Validate point
+    // Validate point (basic check - should be enhanced with proper curve validation)
     if (!isValidG1Point(&point_bytes)) {
         return main.PrecompileResult{ .err = main.PrecompileError.Bn254FieldPointNotAMember };
     }
 
+    // Perform scalar multiplication using mcl wrapper
     var output: [64]u8 = undefined;
     if (mcl_wrapper.isAvailable()) {
         if (mcl_wrapper.g1Mul(point_bytes, scalar_bytes)) |result| {
@@ -175,22 +180,59 @@ fn runPairing(input: []const u8, pair_per_point_cost: u64, pair_base_cost: u64, 
         return main.PrecompileResult{ .err = main.PrecompileError.OutOfGas };
     }
 
-    // TODO: Replace with actual BN254 pairing check using external library
-    // Parse pairs and verify pairing
+    // Parse pairs
+    var pairs = std.ArrayListUnmanaged(G1G2Pair){};
+    defer pairs.deinit(std.heap.c_allocator);
+    pairs.ensureTotalCapacity(std.heap.c_allocator, num_pairs) catch {
+        return main.PrecompileResult{ .err = main.PrecompileError.OutOfGas };
+    };
+
     var i: usize = 0;
     while (i < input.len) : (i += PAIR_ELEMENT_LEN) {
         const g1_bytes = input[i..][0..G1_LEN];
         const g2_bytes = input[i + G1_LEN ..][0..G2_LEN];
+        
+        // Validate points
         if (!isValidG1Point(g1_bytes) or !isValidG2Point(g2_bytes)) {
             return main.PrecompileResult{ .err = main.PrecompileError.Bn254FieldPointNotAMember };
         }
+        
+        const g1: [G1_LEN]u8 = g1_bytes[0..G1_LEN].*;
+        const g2: [G2_LEN]u8 = g2_bytes[0..G2_LEN].*;
+        pairs.append(std.heap.c_allocator, .{ .g1 = g1, .g2 = g2 }) catch {
+            return main.PrecompileResult{ .err = main.PrecompileError.OutOfGas };
+        };
     }
 
-    // Placeholder: actual implementation would check pairing
-    // TODO: Call bn254_pairing_check(pairs) from crypto library
+    // Perform pairing check using mcl wrapper
+    var pairing_valid = false;
+    if (mcl_wrapper.isAvailable()) {
+        // Convert pairs to format expected by mcl_wrapper
+        const mcl_pairs = std.heap.c_allocator.alloc(struct { g1: [64]u8, g2: [128]u8 }, pairs.items.len) catch {
+            return main.PrecompileResult{ .err = main.PrecompileError.OutOfGas };
+        };
+        defer std.heap.c_allocator.free(mcl_pairs);
+        for (pairs.items, 0..) |pair_item, idx| {
+            mcl_pairs[idx].g1 = pair_item.g1;
+            mcl_pairs[idx].g2 = pair_item.g2;
+        }
+        
+        if (mcl_wrapper.pairingCheck(@ptrCast(mcl_pairs))) |result| {
+            pairing_valid = result;
+        } else |_| {
+            // Fallback: assume invalid if mcl fails
+            pairing_valid = false;
+        }
+    } else {
+        // Placeholder: assume invalid if mcl not available
+        pairing_valid = false;
+    }
+
     // Result is 1 if pairing is valid, 0 otherwise
     var output: [32]u8 = [_]u8{0} ** 32;
-    output[31] = 1; // Placeholder: assume valid
+    if (pairing_valid) {
+        output[31] = 1;
+    }
 
     return main.PrecompileResult{ .success = main.PrecompileOutput.new(gas_used, &output) };
 }
