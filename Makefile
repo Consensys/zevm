@@ -208,7 +208,6 @@ install-brew-deps:
 			fi; \
 			echo "$(GREEN)✓ blst headers verified at /tmp/blst/bindings/blst.h$(NC)"; \
 			echo "$(YELLOW)Installing blst library...$(NC)"; \
-			# Try to install to /opt/homebrew first (works without sudo if writable) \
 			if [ -d /opt/homebrew/lib ] && [ -w /opt/homebrew/lib ]; then \
 				cp libblst.a /opt/homebrew/lib/ 2>/dev/null || true; \
 				mkdir -p /opt/homebrew/include 2>/dev/null || true; \
@@ -219,7 +218,6 @@ install-brew-deps:
 					echo "$(YELLOW)⚠ Could not install to /opt/homebrew/include, will use /tmp/blst/bindings$(NC)"; \
 				fi \
 			else \
-				# Try with sudo or fallback to /usr/local \
 				sudo cp libblst.a /opt/homebrew/lib/ 2>/dev/null || cp libblst.a /usr/local/lib/ 2>/dev/null || true; \
 				sudo mkdir -p /opt/homebrew/include 2>/dev/null || mkdir -p /usr/local/include 2>/dev/null || true; \
 				sudo cp bindings/*.h /opt/homebrew/include/ 2>/dev/null || cp bindings/*.h /usr/local/include/ 2>/dev/null || true; \
