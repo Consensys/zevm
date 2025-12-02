@@ -118,14 +118,14 @@ pub fn g1Add(a: [96]u8, b: [96]u8) ![96]u8 {
     p2_affine.y = fp2_y;
 
     // Verify points are on curve and in subgroup
-    if (c.blst_p1_affine_on_curve(&p1_affine) == 0 or
-        c.blst_p1_affine_in_g1(&p1_affine) == 0)
+    if (!c.blst_p1_affine_on_curve(&p1_affine) or
+        !c.blst_p1_affine_in_g1(&p1_affine))
     {
         return error.InvalidG1Point;
     }
 
-    if (c.blst_p1_affine_on_curve(&p2_affine) == 0 or
-        c.blst_p1_affine_in_g1(&p2_affine) == 0)
+    if (!c.blst_p1_affine_on_curve(&p2_affine) or
+        !c.blst_p1_affine_in_g1(&p2_affine))
     {
         return error.InvalidG1Point;
     }
@@ -171,6 +171,13 @@ pub fn g1Msm(pairs: []const struct { point: [96]u8, scalar: [32]u8 }) ![96]u8 {
     var scalars: []c.blst_scalar = try std.heap.c_allocator.alloc(c.blst_scalar, pairs.len);
     defer std.heap.c_allocator.free(scalars);
 
+    // Allocate arrays of pointers for blst API
+    var point_ptrs: []*const c.blst_p1_affine = try std.heap.c_allocator.alloc(*const c.blst_p1_affine, pairs.len);
+    defer std.heap.c_allocator.free(point_ptrs);
+
+    var scalar_ptrs: []*const u8 = try std.heap.c_allocator.alloc(*const u8, pairs.len);
+    defer std.heap.c_allocator.free(scalar_ptrs);
+
     for (pairs, 0..) |pair, i| {
         // Parse point
         var fp_x: c.blst_fp = undefined;
@@ -182,19 +189,29 @@ pub fn g1Msm(pairs: []const struct { point: [96]u8, scalar: [32]u8 }) ![96]u8 {
         points[i].y = fp_y;
 
         // Verify point
-        if (c.blst_p1_affine_on_curve(&points[i]) == 0 or
-            c.blst_p1_affine_in_g1(&points[i]) == 0)
+        if (!c.blst_p1_affine_on_curve(&points[i]) or
+            !c.blst_p1_affine_in_g1(&points[i]))
         {
             return error.InvalidG1Point;
         }
 
         // Parse scalar (32 bytes big-endian)
         c.blst_scalar_from_bendian(&scalars[i], &pair.scalar);
+
+        // Set up pointers
+        point_ptrs[i] = &points[i];
+        scalar_ptrs[i] = @ptrCast(@as(*const u8, @ptrCast(&scalars[i])));
     }
+
+    // Allocate scratch space for MSM (aligned to 8 bytes for limb_t)
+    const scratch_size = c.blst_p1s_mult_pippenger_scratch_sizeof(pairs.len);
+    const scratch_bytes = try std.heap.page_allocator.alloc(u8, scratch_size + 7);
+    defer std.heap.page_allocator.free(scratch_bytes);
+    const scratch_aligned = @as([*]align(8) u8, @ptrCast(@alignCast(scratch_bytes.ptr)))[0..scratch_size];
 
     // Perform MSM
     var result: c.blst_p1 = undefined;
-    c.blst_p1s_mult_pippenger(&result, points.ptr, @intCast(pairs.len), scalars.ptr, @intCast(pairs.len * 8));
+    c.blst_p1s_mult_pippenger(&result, point_ptrs.ptr, @intCast(pairs.len), scalar_ptrs.ptr, 256, @ptrCast(scratch_aligned.ptr));
 
     // Convert to affine and serialize
     var result_affine: c.blst_p1_affine = undefined;
@@ -253,14 +270,14 @@ pub fn g2Add(a: [192]u8, b: [192]u8) ![192]u8 {
     p2_affine.y.fp[1] = fp2_y1;
 
     // Verify points
-    if (c.blst_p2_affine_on_curve(&p1_affine) == 0 or
-        c.blst_p2_affine_in_g2(&p1_affine) == 0)
+    if (!c.blst_p2_affine_on_curve(&p1_affine) or
+        !c.blst_p2_affine_in_g2(&p1_affine))
     {
         return error.InvalidG2Point;
     }
 
-    if (c.blst_p2_affine_on_curve(&p2_affine) == 0 or
-        c.blst_p2_affine_in_g2(&p2_affine) == 0)
+    if (!c.blst_p2_affine_on_curve(&p2_affine) or
+        !c.blst_p2_affine_in_g2(&p2_affine))
     {
         return error.InvalidG2Point;
     }
@@ -306,6 +323,13 @@ pub fn g2Msm(pairs: []const struct { point: [192]u8, scalar: [32]u8 }) ![192]u8 
     var scalars: []c.blst_scalar = try std.heap.c_allocator.alloc(c.blst_scalar, pairs.len);
     defer std.heap.c_allocator.free(scalars);
 
+    // Allocate arrays of pointers for blst API
+    var point_ptrs: []*const c.blst_p2_affine = try std.heap.c_allocator.alloc(*const c.blst_p2_affine, pairs.len);
+    defer std.heap.c_allocator.free(point_ptrs);
+
+    var scalar_ptrs: []*const u8 = try std.heap.c_allocator.alloc(*const u8, pairs.len);
+    defer std.heap.c_allocator.free(scalar_ptrs);
+
     for (pairs, 0..) |pair, i| {
         // Parse G2 point
         var fp_x0: c.blst_fp = undefined;
@@ -324,19 +348,29 @@ pub fn g2Msm(pairs: []const struct { point: [192]u8, scalar: [32]u8 }) ![192]u8 
         points[i].y.fp[1] = fp_y1;
 
         // Verify point
-        if (c.blst_p2_affine_on_curve(&points[i]) == 0 or
-            c.blst_p2_affine_in_g2(&points[i]) == 0)
+        if (!c.blst_p2_affine_on_curve(&points[i]) or
+            !c.blst_p2_affine_in_g2(&points[i]))
         {
             return error.InvalidG2Point;
         }
 
         // Parse scalar
         c.blst_scalar_from_bendian(&scalars[i], &pair.scalar);
+
+        // Set up pointers
+        point_ptrs[i] = &points[i];
+        scalar_ptrs[i] = @ptrCast(@as(*const u8, @ptrCast(&scalars[i])));
     }
+
+    // Allocate scratch space for MSM (aligned to 8 bytes for limb_t)
+    const scratch_size = c.blst_p2s_mult_pippenger_scratch_sizeof(pairs.len);
+    const scratch_bytes = try std.heap.page_allocator.alloc(u8, scratch_size + 7);
+    defer std.heap.page_allocator.free(scratch_bytes);
+    const scratch_aligned = @as([*]align(8) u8, @ptrCast(@alignCast(scratch_bytes.ptr)))[0..scratch_size];
 
     // Perform MSM
     var result: c.blst_p2 = undefined;
-    c.blst_p2s_mult_pippenger(&result, points.ptr, @intCast(pairs.len), scalars.ptr, @intCast(pairs.len * 8));
+    c.blst_p2s_mult_pippenger(&result, point_ptrs.ptr, @intCast(pairs.len), scalar_ptrs.ptr, 256, @ptrCast(scratch_aligned.ptr));
 
     // Convert to affine and serialize
     var result_affine: c.blst_p2_affine = undefined;
@@ -380,8 +414,8 @@ pub fn pairingCheck(pairs: []const struct { g1: [96]u8, g2: [192]u8 }) !bool {
         g1_points[i].x = fp_x;
         g1_points[i].y = fp_y;
 
-        if (c.blst_p1_affine_on_curve(&g1_points[i]) == 0 or
-            c.blst_p1_affine_in_g1(&g1_points[i]) == 0)
+        if (!c.blst_p1_affine_on_curve(&g1_points[i]) or
+            !c.blst_p1_affine_in_g1(&g1_points[i]))
         {
             return error.InvalidG1Point;
         }
@@ -402,8 +436,8 @@ pub fn pairingCheck(pairs: []const struct { g1: [96]u8, g2: [192]u8 }) !bool {
         g2_points[i].y.fp[0] = fp2_y0;
         g2_points[i].y.fp[1] = fp2_y1;
 
-        if (c.blst_p2_affine_on_curve(&g2_points[i]) == 0 or
-            c.blst_p2_affine_in_g2(&g2_points[i]) == 0)
+        if (!c.blst_p2_affine_on_curve(&g2_points[i]) or
+            !c.blst_p2_affine_in_g2(&g2_points[i]))
         {
             return error.InvalidG2Point;
         }
@@ -425,7 +459,7 @@ pub fn pairingCheck(pairs: []const struct { g1: [96]u8, g2: [192]u8 }) !bool {
     c.blst_final_exp(&result, &fp12);
 
     // Check if result is identity (pairing is valid if result == 1)
-    return c.blst_fp12_is_one(&result) != 0;
+    return c.blst_fp12_is_one(&result);
 }
 
 /// BLS12-381 map field element to G1
@@ -515,8 +549,8 @@ pub fn verifyKzgProof(commitment: [48]u8, z: [32]u8, y: [32]u8, proof: [48]u8) !
     if (c.blst_p1_uncompress(&commitment_affine, &commitment) != 0) {
         return false; // Invalid G1 point
     }
-    if (c.blst_p1_affine_on_curve(&commitment_affine) == 0 or
-        c.blst_p1_affine_in_g1(&commitment_affine) == 0)
+    if (!c.blst_p1_affine_on_curve(&commitment_affine) or
+        !c.blst_p1_affine_in_g1(&commitment_affine))
     {
         return false;
     }
@@ -526,8 +560,8 @@ pub fn verifyKzgProof(commitment: [48]u8, z: [32]u8, y: [32]u8, proof: [48]u8) !
     if (c.blst_p1_uncompress(&proof_affine, &proof) != 0) {
         return false; // Invalid G1 point
     }
-    if (c.blst_p1_affine_on_curve(&proof_affine) == 0 or
-        c.blst_p1_affine_in_g1(&proof_affine) == 0)
+    if (!c.blst_p1_affine_on_curve(&proof_affine) or
+        !c.blst_p1_affine_in_g1(&proof_affine))
     {
         return false;
     }
@@ -552,15 +586,17 @@ pub fn verifyKzgProof(commitment: [48]u8, z: [32]u8, y: [32]u8, proof: [48]u8) !
     var g1_projective: c.blst_p1 = undefined;
     c.blst_p1_from_affine(&g1_projective, &g1_generator);
     var y_g1: c.blst_p1 = undefined;
-    c.blst_p1_mult(&y_g1, &g1_projective, &y_scalar, 8 * 32);
+    c.blst_p1_mult(&y_g1, &g1_projective, @ptrCast(@as(*const u8, @ptrCast(&y_scalar))), 8 * 32);
     var y_g1_affine: c.blst_p1_affine = undefined;
     c.blst_p1_to_affine(&y_g1_affine, &y_g1);
 
     // Compute commitment - [y]G1 = P_minus_y
     var commitment_proj: c.blst_p1 = undefined;
     c.blst_p1_from_affine(&commitment_proj, &commitment_affine);
+    var y_g1_neg: c.blst_p1 = y_g1;
+    c.blst_p1_cneg(&y_g1_neg, true); // Negate y_g1
     var p_minus_y: c.blst_p1 = undefined;
-    c.blst_p1_sub(&p_minus_y, &commitment_proj, &y_g1);
+    c.blst_p1_add(&p_minus_y, &commitment_proj, &y_g1_neg);
     var p_minus_y_affine: c.blst_p1_affine = undefined;
     c.blst_p1_to_affine(&p_minus_y_affine, &p_minus_y);
 
@@ -568,21 +604,23 @@ pub fn verifyKzgProof(commitment: [48]u8, z: [32]u8, y: [32]u8, proof: [48]u8) !
     var g2_projective: c.blst_p2 = undefined;
     c.blst_p2_from_affine(&g2_projective, &g2_generator);
     var z_g2: c.blst_p2 = undefined;
-    c.blst_p2_mult(&z_g2, &g2_projective, &z_scalar, 8 * 32);
+    c.blst_p2_mult(&z_g2, &g2_projective, @ptrCast(@as(*const u8, @ptrCast(&z_scalar))), 8 * 32);
     var z_g2_affine: c.blst_p2_affine = undefined;
     c.blst_p2_to_affine(&z_g2_affine, &z_g2);
 
     // Compute [τ]G2 - [z]G2 = X_minus_z
     var tau_g2_proj: c.blst_p2 = undefined;
     c.blst_p2_from_affine(&tau_g2_proj, &tau_g2_affine);
+    var z_g2_neg_for_x: c.blst_p2 = z_g2;
+    c.blst_p2_cneg(&z_g2_neg_for_x, true); // Negate z_g2
     var x_minus_z: c.blst_p2 = undefined;
-    c.blst_p2_sub(&x_minus_z, &tau_g2_proj, &z_g2);
+    c.blst_p2_add(&x_minus_z, &tau_g2_proj, &z_g2_neg_for_x);
     var x_minus_z_affine: c.blst_p2_affine = undefined;
     c.blst_p2_to_affine(&x_minus_z_affine, &x_minus_z);
 
     // Compute -G2
-    var neg_g2: c.blst_p2 = undefined;
-    c.blst_p2_neg(&neg_g2, &g2_projective);
+    var neg_g2: c.blst_p2 = g2_projective;
+    c.blst_p2_cneg(&neg_g2, true); // Negate G2
     var neg_g2_affine: c.blst_p2_affine = undefined;
     c.blst_p2_to_affine(&neg_g2_affine, &neg_g2);
 
@@ -601,7 +639,7 @@ pub fn verifyKzgProof(commitment: [48]u8, z: [32]u8, y: [32]u8, proof: [48]u8) !
     c.blst_final_exp(&fp12_result, &fp12_product);
 
     // Check if result is identity (pairing is valid if result == 1)
-    return c.blst_fp12_is_one(&fp12_result) != 0;
+    return c.blst_fp12_is_one(&fp12_result);
 }
 
 pub const BlstError = error{

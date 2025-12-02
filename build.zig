@@ -16,12 +16,14 @@ pub fn build(b: *std.Build) void {
     const enable_mcl = b.option(bool, "mcl", "Enable mcl library for BN254 operations") orelse true;
 
     // Platform-specific default include paths
-    // Note: Users should override these with -Dblst-include=... or -Dmcl-include=...
+    // Note: Users should override these with -Dblst-include=... or -Dmcl-include=... 
     // if libraries are installed in non-standard locations
     const default_include_path = if (is_windows)
         "C:/Program Files" // Windows default (users should override)
+    else if (target_info.os.tag == .macos)
+        "/opt/homebrew/include" // macOS Homebrew default
     else
-        "/usr/local/include"; // Unix default (macOS, Linux, BSD)
+        "/usr/local/include"; // Unix default (Linux, BSD)
 
     const blst_include_path = b.option([]const u8, "blst-include", "Path to blst include directory") orelse default_include_path;
     const mcl_include_path = b.option([]const u8, "mcl-include", "Path to mcl include directory") orelse default_include_path;

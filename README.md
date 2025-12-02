@@ -65,6 +65,27 @@ ZEVM is a complete EVM implementation that provides:
 
 ## Building
 
+### Quick Start (Recommended)
+
+The easiest way to build ZEVM is using the provided Makefile:
+
+```bash
+# Auto-detect OS, install dependencies, and build
+make
+
+# Or step by step:
+make install-deps  # Install dependencies
+make build         # Build the project
+make test          # Run tests
+```
+
+The Makefile automatically:
+- Detects your operating system (macOS, Linux, Windows)
+- Installs required dependencies via the appropriate package manager
+- Builds the project with correct options
+
+See `make help` for more options.
+
 ### Prerequisites
 
 - Zig 0.15.1 or later
@@ -74,7 +95,11 @@ ZEVM is a complete EVM implementation that provides:
 - **secp256k1** (required, typically available via package managers)
 - **OpenSSL** (required, typically available via package managers)
 
-### Build Commands
+**⚠️ Note**: If you see "library not found" errors for `blst` or `mcl`, you need to install these libraries first. See [CROSS_PLATFORM.md](CROSS_PLATFORM.md) for detailed installation instructions. You can temporarily disable them with `zig build -Dblst=false -Dmcl=false`, but this will disable related precompiles.
+
+### Manual Build Commands
+
+If you prefer to build manually:
 
 ```bash
 # Build the library and all executables
