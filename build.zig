@@ -66,6 +66,12 @@ pub fn build(b: *std.Build) void {
                 step.linkSystemLibrary("ssl");
                 step.linkSystemLibrary("crypto");
             }
+            
+            // Link C++ standard library early if mcl is enabled
+            // This ensures C++ symbols are available when linking static mcl library
+            if (mcl_enabled) {
+                step.linkLibCpp();
+            }
 
             // blst is required by default
             if (blst_enabled) {
@@ -105,6 +111,7 @@ pub fn build(b: *std.Build) void {
             }
 
             if (mcl_enabled) {
+                // C++ standard library is already linked above
                 // Try to link static library directly if available
                 const mcl_static_paths = if (is_macos)
                     [_][]const u8{ "/opt/homebrew/lib/libmcl.a", "/usr/local/lib/libmcl.a" }
@@ -126,8 +133,6 @@ pub fn build(b: *std.Build) void {
                 if (!found_mcl_static) {
                     step.linkSystemLibrary("mcl");
                 }
-                
-                step.linkLibCpp(); // mcl is C++ library, needs C++ standard library
                 
                 // Use cwd_relative for absolute paths, or path for relative paths
                 if (std.fs.path.isAbsolute(mcl_inc)) {
