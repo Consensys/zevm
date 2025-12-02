@@ -396,7 +396,10 @@ build-with-deps: install-deps build
 # Run tests
 test: build
 	@echo "$(BLUE)Running tests...$(NC)"
-	@./zig-out/bin/zevm-test || zig build test
+	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+		export DYLD_LIBRARY_PATH="/opt/homebrew/lib:/usr/local/lib:$$DYLD_LIBRARY_PATH"; \
+	fi; \
+	./zig-out/bin/zevm-test || zig build test
 	@echo "$(GREEN)✓ Tests complete!$(NC)"
 
 # Clean build artifacts

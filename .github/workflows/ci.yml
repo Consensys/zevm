@@ -53,6 +53,8 @@ jobs:
         run: make build
 
       - name: Run tests
+        env:
+          DYLD_LIBRARY_PATH: /opt/homebrew/lib:/usr/local/lib
         run: make test
 
       - name: Run precompile unit tests

@@ -44,6 +44,7 @@ pub fn build(b: *std.Build) void {
             blst_inc: []const u8,
             mcl_inc: []const u8,
             is_win: bool,
+            _: bool, // is_macos - unused but kept for API consistency
         ) void {
             step.linkSystemLibrary("c");
 
@@ -83,7 +84,10 @@ pub fn build(b: *std.Build) void {
             }
 
             if (mcl_enabled) {
+                // Link mcl library
+                // Note: On macOS, if linking dynamically, DYLD_LIBRARY_PATH must include library location
                 step.linkSystemLibrary("mcl");
+                
                 // Use cwd_relative for absolute paths, or path for relative paths
                 if (std.fs.path.isAbsolute(mcl_inc)) {
                     step.root_module.addIncludePath(.{ .cwd_relative = mcl_inc });
@@ -106,7 +110,7 @@ pub fn build(b: *std.Build) void {
     lib.root_module.addImport("build_options", lib_options_module);
 
     // Add crypto dependencies
-    addCryptoLibraries(b, lib, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows);
+    addCryptoLibraries(b, lib, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
 
     // Install the library
     b.installArtifact(lib);
@@ -212,7 +216,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    addCryptoLibraries(b, test_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows);
+    addCryptoLibraries(b, test_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
     test_exe.root_module.addImport("build_options", lib_options_module);
     test_exe.root_module.addImport("primitives", primitives_module);
     test_exe.root_module.addImport("bytecode", bytecode_module);
@@ -236,7 +240,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    addCryptoLibraries(b, bench_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows);
+    addCryptoLibraries(b, bench_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
     bench_exe.root_module.addImport("build_options", lib_options_module);
     bench_exe.root_module.addImport("primitives", primitives_module);
     bench_exe.root_module.addImport("bytecode", bytecode_module);
@@ -269,7 +273,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    addCryptoLibraries(b, example_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows);
+    addCryptoLibraries(b, example_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
     example_exe.root_module.addImport("build_options", lib_options_module);
     example_exe.root_module.addImport("zevm", lib.root_module);
     example_exe.root_module.addImport("primitives", primitives_module);
@@ -293,7 +297,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    addCryptoLibraries(b, simple_contract_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows);
+    addCryptoLibraries(b, simple_contract_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
     simple_contract_exe.root_module.addImport("build_options", lib_options_module);
     simple_contract_exe.root_module.addImport("primitives", primitives_module);
     simple_contract_exe.root_module.addImport("bytecode", bytecode_module);
@@ -314,7 +318,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    addCryptoLibraries(b, gas_inspector_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows);
+    addCryptoLibraries(b, gas_inspector_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
     gas_inspector_exe.root_module.addImport("build_options", lib_options_module);
     gas_inspector_exe.root_module.addImport("primitives", primitives_module);
     gas_inspector_exe.root_module.addImport("bytecode", bytecode_module);
@@ -335,7 +339,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    addCryptoLibraries(b, precompile_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows);
+    addCryptoLibraries(b, precompile_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
     precompile_exe.root_module.addImport("build_options", lib_options_module);
     precompile_exe.root_module.addImport("primitives", primitives_module);
     precompile_exe.root_module.addImport("bytecode", bytecode_module);
@@ -357,7 +361,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    addCryptoLibraries(b, contract_deployment_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows);
+    addCryptoLibraries(b, contract_deployment_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
     contract_deployment_exe.root_module.addImport("build_options", lib_options_module);
     contract_deployment_exe.root_module.addImport("primitives", primitives_module);
     contract_deployment_exe.root_module.addImport("bytecode", bytecode_module);
@@ -379,7 +383,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    addCryptoLibraries(b, uniswap_reserves_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows);
+    addCryptoLibraries(b, uniswap_reserves_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
     uniswap_reserves_exe.root_module.addImport("build_options", lib_options_module);
     uniswap_reserves_exe.root_module.addImport("primitives", primitives_module);
     uniswap_reserves_exe.root_module.addImport("bytecode", bytecode_module);
@@ -401,7 +405,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    addCryptoLibraries(b, custom_opcodes_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows);
+    addCryptoLibraries(b, custom_opcodes_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
     custom_opcodes_exe.root_module.addImport("build_options", lib_options_module);
     custom_opcodes_exe.root_module.addImport("primitives", primitives_module);
     custom_opcodes_exe.root_module.addImport("bytecode", bytecode_module);
@@ -423,7 +427,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    addCryptoLibraries(b, database_components_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows);
+    addCryptoLibraries(b, database_components_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
     database_components_exe.root_module.addImport("build_options", lib_options_module);
     database_components_exe.root_module.addImport("primitives", primitives_module);
     database_components_exe.root_module.addImport("bytecode", bytecode_module);
@@ -445,7 +449,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    addCryptoLibraries(b, cheatcode_inspector_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows);
+    addCryptoLibraries(b, cheatcode_inspector_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
     cheatcode_inspector_exe.root_module.addImport("build_options", lib_options_module);
     cheatcode_inspector_exe.root_module.addImport("primitives", primitives_module);
     cheatcode_inspector_exe.root_module.addImport("bytecode", bytecode_module);
