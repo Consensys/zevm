@@ -2,7 +2,7 @@
 
 [![Zig](https://img.shields.io/badge/Zig-0.15.1+-blue.svg)](https://ziglang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.1.0-orange.svg)](RELEASE_NOTES.md)
+[![Version](https://img.shields.io/badge/Version-0.3.0-orange.svg)](RELEASE_NOTES.md)
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)](https://github.com/10d9e/zevm/actions)
 [![Tests](https://img.shields.io/badge/Tests-100%25%20Passing-brightgreen.svg)](https://github.com/10d9e/zevm/actions)
 
