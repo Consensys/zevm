@@ -8,7 +8,7 @@
 
 A high-performance Ethereum Virtual Machine implementation in Zig.
 
-<img width="400" height="400" alt="image" src="https://github.com/user-attachments/assets/e840bec8-26e7-47ee-8b8c-d9723c9183bd" />
+<img width="400" height="400" alt="image" src="https://github.com/user-attachments/assets/9be1b24d-4c8e-423a-b9b4-8fb47378be55" />
 
 ## Overview
 
