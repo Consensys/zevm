@@ -38,6 +38,9 @@ pub fn main() !void {
     // Benchmark 7: Context operations
     try benchmarkContextOperations(allocator);
 
+    // Benchmark 8: ADD opcode
+    benchmarkAddOpcode();
+
     std.log.info("=== Benchmark Complete ===", .{});
 }
 
@@ -211,4 +214,65 @@ fn benchmarkContextOperations(allocator: std.mem.Allocator) !void {
     const ops_per_sec = (iterations * 1_000_000_000) / @as(u64, @intCast(duration));
 
     std.log.info("Context operations: {} ops/sec", .{ops_per_sec});
+}
+
+fn benchmarkAddOpcode() void {
+    std.log.info("Benchmarking ADD opcode...", .{});
+
+    // === Benchmark A: Raw pop-pop-add-push (div0-comparable) ===
+    // Methodology matches div0 exactly:
+    //   - Pre-fill stack with 900 values (outside timed region)
+    //   - Time 400 iterations of pop-pop-add-push per batch
+    //   - 2500 batches × 400 ops = 1,000,000 total iterations
+    const PREFILL = 900;
+    const OPS_PER_BATCH = 400;
+    const BATCHES = 2500;
+    const TOTAL_OPS = OPS_PER_BATCH * BATCHES;
+
+    var stack = interpreter.Stack.new();
+    var total_ns: u64 = 0;
+
+    for (0..BATCHES) |batch| {
+        // Pre-fill stack outside timed region
+        stack.clear();
+        for (0..PREFILL) |i| {
+            stack.pushUnsafe(@as(primitives.U256, i +% batch *% PREFILL));
+        }
+
+        // --- Timed region: pure pop-pop-add-push ---
+        const start = std.time.nanoTimestamp();
+        for (0..OPS_PER_BATCH) |_| {
+            const a = stack.popUnsafe();
+            const b = stack.popUnsafe();
+            stack.pushUnsafe(a +% b);
+            std.mem.doNotOptimizeAway(&stack);
+        }
+        total_ns += @intCast(std.time.nanoTimestamp() - start);
+    }
+
+    const ns_per_op_raw = total_ns / TOTAL_OPS;
+    const ops_per_sec_raw = (@as(u64, TOTAL_OPS) * 1_000_000_000) / total_ns;
+    std.log.info("OP_ADD (raw pop-pop-add-push): {} ns/op, {} ops/sec", .{ ns_per_op_raw, ops_per_sec_raw });
+
+    // === Benchmark B: Full opAdd with gas/stack checks ===
+    total_ns = 0;
+    for (0..BATCHES) |batch| {
+        stack.clear();
+        for (0..PREFILL) |i| {
+            stack.pushUnsafe(@as(primitives.U256, i +% batch *% PREFILL));
+        }
+        var gas = interpreter.Gas.new(OPS_PER_BATCH * 3 + 1000);
+
+        const start = std.time.nanoTimestamp();
+        for (0..OPS_PER_BATCH) |_| {
+            _ = interpreter.opcodes.opAdd(&stack, &gas);
+            std.mem.doNotOptimizeAway(&stack);
+        }
+        total_ns += @intCast(std.time.nanoTimestamp() - start);
+    }
+
+    const ns_per_op_full = total_ns / TOTAL_OPS;
+    const ops_per_sec_full = (@as(u64, TOTAL_OPS) * 1_000_000_000) / total_ns;
+    const mgas_per_sec = (@as(u64, TOTAL_OPS) * 3 * 1_000) / total_ns;
+    std.log.info("OP_ADD (full w/ gas+stack): {} ns/op, {} ops/sec, {} MGas/sec", .{ ns_per_op_full, ops_per_sec_full, mgas_per_sec });
 }

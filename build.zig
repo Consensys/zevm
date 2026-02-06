@@ -299,13 +299,13 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(test_exe);
 
-    // Benchmark executable
+    // Benchmark executable (always ReleaseFast for accurate timing)
     const bench_exe = b.addExecutable(.{
         .name = "zevm-bench",
         .root_module = b.addModule("zevm-bench", .{
             .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "examples/benchmark.zig" } },
             .target = target,
-            .optimize = optimize,
+            .optimize = .ReleaseFast,
         }),
     });
 
