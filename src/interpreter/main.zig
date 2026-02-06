@@ -78,5 +78,4 @@ pub const testing = struct {
 
         std.debug.print("Interpreter tests passed.\n", .{});
     }
-
 };

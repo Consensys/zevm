@@ -166,7 +166,7 @@ test "JUMP: stack underflow" {
     var gas = Gas.new(100);
     var pc: usize = 0;
 
-    const code = [_]u8{ 0x5B };
+    const code = [_]u8{0x5B};
     const bytecode = Bytecode.new_raw(&code);
 
     const result = opJump(&stack, &gas, bytecode, &pc);
@@ -241,7 +241,7 @@ test "JUMPI: stack underflow" {
     var gas = Gas.new(100);
     var pc: usize = 0;
 
-    const code = [_]u8{ 0x5B };
+    const code = [_]u8{0x5B};
     const bytecode = Bytecode.new_raw(&code);
 
     stack.pushUnsafe(@as(U, 1)); // Only 1 value, need 2
