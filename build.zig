@@ -303,7 +303,7 @@ pub fn build(b: *std.Build) void {
     const bench_exe = b.addExecutable(.{
         .name = "zevm-bench",
         .root_module = b.addModule("zevm-bench", .{
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "examples/benchmark.zig" } },
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "benchmarks/main.zig" } },
             .target = target,
             .optimize = .ReleaseFast,
         }),

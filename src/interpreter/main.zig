@@ -35,6 +35,7 @@ pub const STACK_LIMIT = 1024;
 test {
     _ = @import("stack.zig");
     _ = @import("opcodes/arithmetic.zig");
+    _ = @import("opcodes/arithmetic_tests.zig");
 }
 
 /// Main interpreter module for EVM bytecode execution
