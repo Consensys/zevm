@@ -328,15 +328,17 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
 
-    // Inline zig tests for interpreter module (stack, etc.)
+    // Inline zig tests for interpreter module (discovers tests in all imported files)
     const interpreter_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/interpreter/stack.zig" } },
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/interpreter/main.zig" } },
             .target = target,
             .optimize = optimize,
         }),
     });
     interpreter_tests.root_module.addImport("primitives", primitives_module);
+    interpreter_tests.root_module.addImport("bytecode", bytecode_module);
+    interpreter_tests.root_module.addImport("context", context_module);
     const run_interpreter_tests = b.addRunArtifact(interpreter_tests);
     test_step.dependOn(&run_interpreter_tests.step);
 
