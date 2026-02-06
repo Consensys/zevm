@@ -110,6 +110,42 @@ pub inline fn opExp(stack: *Stack, gas: *Gas) InstructionResult {
     return .continue_;
 }
 
+/// SDIV opcode (0x05): a / b (signed, division by zero returns 0)
+/// Stack: [a, b] -> [a / b]   Gas: 5 (LOW)
+pub inline fn opSdiv(stack: *Stack, gas: *Gas) InstructionResult {
+    if (!stack.hasItems(2)) return .stack_underflow;
+    if (!gas.spend(GAS_LOW)) return .out_of_gas;
+    const a = stack.peekUnsafe(0);
+    const b = stack.peekUnsafe(1);
+    stack.shrinkUnsafe(1);
+    stack.setTopUnsafe().* = sdiv(a, b);
+    return .continue_;
+}
+
+/// SMOD opcode (0x07): a % b (signed, mod by zero returns 0)
+/// Stack: [a, b] -> [a % b]   Gas: 5 (LOW)
+pub inline fn opSmod(stack: *Stack, gas: *Gas) InstructionResult {
+    if (!stack.hasItems(2)) return .stack_underflow;
+    if (!gas.spend(GAS_LOW)) return .out_of_gas;
+    const a = stack.peekUnsafe(0);
+    const b = stack.peekUnsafe(1);
+    stack.shrinkUnsafe(1);
+    stack.setTopUnsafe().* = smod(a, b);
+    return .continue_;
+}
+
+/// SIGNEXTEND opcode (0x0B): Sign extend value from byte position
+/// Stack: [byte_pos, value] -> [extended_value]   Gas: 5 (LOW)
+pub inline fn opSignextend(stack: *Stack, gas: *Gas) InstructionResult {
+    if (!stack.hasItems(2)) return .stack_underflow;
+    if (!gas.spend(GAS_LOW)) return .out_of_gas;
+    const byte_pos = stack.peekUnsafe(0);
+    const value = stack.peekUnsafe(1);
+    stack.shrinkUnsafe(1);
+    stack.setTopUnsafe().* = signextend(byte_pos, value);
+    return .continue_;
+}
+
 // --- Helpers ---
 
 /// Compute (a + b) % n using only u256 arithmetic.
@@ -174,6 +210,73 @@ pub fn expMod256(base: primitives.U256, exp: primitives.U256) primitives.U256 {
 pub fn byteSize(x: primitives.U256) u64 {
     if (x == 0) return 0;
     return (256 - @as(u64, @clz(x)) + 7) / 8;
+}
+
+/// Signed division: a / b in two's complement.
+/// Returns 0 when b == 0 (per EVM spec).
+/// Special case: MIN / -1 = MIN (overflow wraps).
+pub fn sdiv(a: primitives.U256, b: primitives.U256) primitives.U256 {
+    if (b == 0) return 0;
+
+    const sign_bit: primitives.U256 = 1 << 255;
+    const a_negative = (a & sign_bit) != 0;
+    const b_negative = (b & sign_bit) != 0;
+
+    // Convert to absolute values
+    const abs_a = if (a_negative) (~a) +% 1 else a;
+    const abs_b = if (b_negative) (~b) +% 1 else b;
+
+    // Perform unsigned division
+    const abs_result = abs_a / abs_b;
+
+    // Apply sign: negative if signs differ
+    const result_negative = a_negative != b_negative;
+    return if (result_negative) (~abs_result) +% 1 else abs_result;
+}
+
+/// Signed modulo: a % b in two's complement.
+/// Returns 0 when b == 0 (per EVM spec).
+/// Result has the same sign as dividend a.
+pub fn smod(a: primitives.U256, b: primitives.U256) primitives.U256 {
+    if (b == 0) return 0;
+
+    const sign_bit: primitives.U256 = 1 << 255;
+    const a_negative = (a & sign_bit) != 0;
+    const b_negative = (b & sign_bit) != 0;
+
+    // Convert to absolute values
+    const abs_a = if (a_negative) (~a) +% 1 else a;
+    const abs_b = if (b_negative) (~b) +% 1 else b;
+
+    // Perform unsigned modulo
+    const abs_result = abs_a % abs_b;
+
+    // Result has the sign of dividend a
+    return if (a_negative) (~abs_result) +% 1 else abs_result;
+}
+
+/// Sign extend value from byte position.
+/// byte_pos: which byte (0-31) to extend from
+/// value: the value to extend
+/// If byte_pos >= 31, returns value unchanged.
+pub fn signextend(byte_pos: primitives.U256, value: primitives.U256) primitives.U256 {
+    // If byte position is out of range (>= 31), no extension needed
+    if (byte_pos >= 31) return value;
+
+    const byte_pos_usize: usize = @intCast(byte_pos);
+    const bit_pos = (byte_pos_usize * 8) + 7; // Sign bit position
+    const sign_bit: primitives.U256 = @as(primitives.U256, 1) << @intCast(bit_pos);
+
+    // Check if sign bit is set
+    if ((value & sign_bit) != 0) {
+        // Negative: set all higher bits to 1
+        const mask = (~@as(primitives.U256, 0)) << @intCast(bit_pos);
+        return value | mask;
+    } else {
+        // Positive: clear all higher bits to 0
+        const mask = (@as(primitives.U256, 1) << @intCast(bit_pos + 1)) -% 1;
+        return value & mask;
+    }
 }
 
 test {

@@ -11,8 +11,11 @@ var g_gas: interpreter.Gas = interpreter.Gas.new(0);
 
 const ADD_GAS_COST = 3;
 const DIV_GAS_COST = 5;
+const SDIV_GAS_COST = 5;
 const MUL_GAS_COST = 5;
 const MOD_GAS_COST = 5;
+const SMOD_GAS_COST = 5;
+const SIGNEXTEND_GAS_COST = 5;
 const MID_GAS_COST = 8;
 const EXP_GAS_1BYTE: u64 = 10 + 50; // 1-byte exponent
 const EXP_GAS_32BYTE: u64 = 10 + 50 * 32; // 32-byte exponent
@@ -235,6 +238,126 @@ fn benchOpMod(_: std.mem.Allocator) void {
     std.mem.doNotOptimizeAway(&g_stack);
 }
 
+// --- SDIV ---
+
+fn resetSdiv() void {
+    ensureInit();
+    g_stack.clear();
+    // Random 256-bit dividend / 128-bit divisor (signed)
+    for (0..PREFILL / 2) |i| {
+        g_stack.pushUnsafe(g_divisor_128); // b (divisor)
+        g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // a (dividend)
+    }
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * SDIV_GAS_COST + 1000);
+}
+
+fn resetSdivNegative() void {
+    ensureInit();
+    g_stack.clear();
+    const sign_bit: primitives.U256 = 1 << 255;
+    // Negative dividend / positive divisor
+    for (0..PREFILL / 2) |i| {
+        g_stack.pushUnsafe(g_divisor_128); // b (positive divisor)
+        g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)] | sign_bit); // a (negative)
+    }
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * SDIV_GAS_COST + 1000);
+}
+
+fn resetSdivBothNeg() void {
+    ensureInit();
+    g_stack.clear();
+    const sign_bit: primitives.U256 = 1 << 255;
+    // Negative dividend / negative divisor
+    for (0..PREFILL / 2) |i| {
+        g_stack.pushUnsafe(g_divisor_128 | sign_bit); // b (negative)
+        g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)] | sign_bit); // a (negative)
+    }
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * SDIV_GAS_COST + 1000);
+}
+
+fn benchOpSdiv(_: std.mem.Allocator) void {
+    for (0..OPS_PER_BATCH) |_| {
+        _ = interpreter.opcodes.opSdiv(&g_stack, &g_gas);
+    }
+    std.mem.doNotOptimizeAway(&g_stack);
+}
+
+// --- SMOD ---
+
+fn resetSmod() void {
+    ensureInit();
+    g_stack.clear();
+    for (0..PREFILL / 2) |i| {
+        g_stack.pushUnsafe(g_divisor_128); // b (divisor)
+        g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // a
+    }
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * SMOD_GAS_COST + 1000);
+}
+
+fn resetSmodNegative() void {
+    ensureInit();
+    g_stack.clear();
+    const sign_bit: primitives.U256 = 1 << 255;
+    // Negative dividend (result takes sign of dividend)
+    for (0..PREFILL / 2) |i| {
+        g_stack.pushUnsafe(g_divisor_128); // b (positive divisor)
+        g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)] | sign_bit); // a (negative)
+    }
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * SMOD_GAS_COST + 1000);
+}
+
+fn benchOpSmod(_: std.mem.Allocator) void {
+    for (0..OPS_PER_BATCH) |_| {
+        _ = interpreter.opcodes.opSmod(&g_stack, &g_gas);
+    }
+    std.mem.doNotOptimizeAway(&g_stack);
+}
+
+// --- SIGNEXTEND ---
+
+fn resetSignextend() void {
+    ensureInit();
+    g_stack.clear();
+    // Test various byte positions (0-15) with random values
+    for (0..PREFILL / 2) |i| {
+        const byte_pos = i & 15; // 0-15
+        g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // value
+        g_stack.pushUnsafe(@as(primitives.U256, byte_pos)); // byte_pos
+    }
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * SIGNEXTEND_GAS_COST + 1000);
+}
+
+fn resetSignextendLow() void {
+    ensureInit();
+    g_stack.clear();
+    // Low byte positions (0-3) — more work
+    for (0..PREFILL / 2) |i| {
+        const byte_pos = i & 3; // 0-3
+        g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // value
+        g_stack.pushUnsafe(@as(primitives.U256, byte_pos)); // byte_pos
+    }
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * SIGNEXTEND_GAS_COST + 1000);
+}
+
+fn resetSignextendHigh() void {
+    ensureInit();
+    g_stack.clear();
+    // High byte positions (28-31) — less work (no extension)
+    for (0..PREFILL / 2) |i| {
+        const byte_pos = 28 + (i & 3); // 28-31
+        g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // value
+        g_stack.pushUnsafe(@as(primitives.U256, byte_pos)); // byte_pos
+    }
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * SIGNEXTEND_GAS_COST + 1000);
+}
+
+fn benchOpSignextend(_: std.mem.Allocator) void {
+    for (0..OPS_PER_BATCH) |_| {
+        _ = interpreter.opcodes.opSignextend(&g_stack, &g_gas);
+    }
+    std.mem.doNotOptimizeAway(&g_stack);
+}
+
 // --- ADDMOD ---
 
 const TERNARY_PREFILL = 900; // must be divisible by 3
@@ -346,7 +469,12 @@ fn gasCostForName(name: []const u8) f64 {
     }
     if (std.mem.startsWith(u8, name, "OP_ADDMOD") or std.mem.startsWith(u8, name, "OP_MULMOD"))
         return @floatFromInt(MID_GAS_COST);
-    if (std.mem.startsWith(u8, name, "OP_DIV") or std.mem.startsWith(u8, name, "OP_MUL") or std.mem.startsWith(u8, name, "OP_MOD"))
+    if (std.mem.startsWith(u8, name, "OP_DIV") or
+        std.mem.startsWith(u8, name, "OP_SDIV") or
+        std.mem.startsWith(u8, name, "OP_MUL") or
+        std.mem.startsWith(u8, name, "OP_MOD") or
+        std.mem.startsWith(u8, name, "OP_SMOD") or
+        std.mem.startsWith(u8, name, "OP_SIGNEXTEND"))
         return @floatFromInt(DIV_GAS_COST);
     return @floatFromInt(ADD_GAS_COST); // ADD, SUB
 }
@@ -396,6 +524,30 @@ pub fn main() !void {
     });
     try bench.add("OP_MOD (zero)", benchOpMod, .{
         .hooks = .{ .before_each = resetModZero },
+    });
+    try bench.add("OP_SDIV", benchOpSdiv, .{
+        .hooks = .{ .before_each = resetSdiv },
+    });
+    try bench.add("OP_SDIV (neg/pos)", benchOpSdiv, .{
+        .hooks = .{ .before_each = resetSdivNegative },
+    });
+    try bench.add("OP_SDIV (neg/neg)", benchOpSdiv, .{
+        .hooks = .{ .before_each = resetSdivBothNeg },
+    });
+    try bench.add("OP_SMOD", benchOpSmod, .{
+        .hooks = .{ .before_each = resetSmod },
+    });
+    try bench.add("OP_SMOD (neg div)", benchOpSmod, .{
+        .hooks = .{ .before_each = resetSmodNegative },
+    });
+    try bench.add("OP_SIGNEXTEND", benchOpSignextend, .{
+        .hooks = .{ .before_each = resetSignextend },
+    });
+    try bench.add("OP_SIGNEXTEND (0-3)", benchOpSignextend, .{
+        .hooks = .{ .before_each = resetSignextendLow },
+    });
+    try bench.add("OP_SIGNEXTEND (28-31)", benchOpSignextend, .{
+        .hooks = .{ .before_each = resetSignextendHigh },
     });
     try bench.add("OP_ADDMOD", benchOpAddmod, .{
         .hooks = .{ .before_each = resetAddmod },
