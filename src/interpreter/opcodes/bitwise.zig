@@ -119,16 +119,20 @@ pub inline fn opSar(stack: *Stack, gas: *Gas) InstructionResult {
 
     // Check if value is negative (MSB set)
     const is_negative = (value >> 255) == 1;
+    const MAX: primitives.U256 = std.math.maxInt(primitives.U256);
 
-    const result = if (shift >= 256)
-        if (is_negative) std.math.maxInt(primitives.U256) else 0
-    else if (is_negative) blk: {
+    const result = if (shift >= 256) blk: {
+        // Shift >= 256 means all bits shift out
+        break :blk if (is_negative) MAX else 0;
+    } else if (is_negative) blk: {
         // For negative numbers, we need to fill with 1s from the left
         const shifted = value >> @intCast(shift);
-        const mask = std.math.maxInt(primitives.U256) << @intCast(256 - shift);
+        const mask = MAX << @intCast(256 - shift);
         break :blk shifted | mask;
-    } else
-        value >> @intCast(shift);
+    } else blk: {
+        // Positive number: standard logical shift
+        break :blk value >> @intCast(shift);
+    };
 
     stack.setTopUnsafe().* = result;
     return .continue_;
