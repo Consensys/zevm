@@ -99,3 +99,7 @@ pub inline fn opIsZero(stack: *Stack, gas: *Gas) InstructionResult {
     ptr.* = if (ptr.* == 0) 1 else 0;
     return .continue_;
 }
+
+test {
+    _ = @import("comparison_tests.zig");
+}

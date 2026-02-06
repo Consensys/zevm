@@ -64,3 +64,7 @@ pub inline fn opSwapN(stack: *Stack, gas: *Gas, n: u8) InstructionResult {
     stack.swapUnsafe(n);
     return .continue_;
 }
+
+test {
+    _ = @import("stack_tests.zig");
+}

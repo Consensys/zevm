@@ -198,3 +198,7 @@ pub inline fn opMcopy(stack: *Stack, gas: *Gas, memory: *Memory) InstructionResu
 
     return .continue_;
 }
+
+test {
+    _ = @import("memory_tests.zig");
+}

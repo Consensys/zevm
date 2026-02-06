@@ -137,3 +137,7 @@ pub inline fn opSar(stack: *Stack, gas: *Gas) InstructionResult {
     stack.setTopUnsafe().* = result;
     return .continue_;
 }
+
+test {
+    _ = @import("bitwise_tests.zig");
+}

@@ -60,3 +60,7 @@ pub inline fn opKeccak256(stack: *Stack, gas: *Gas, memory: *Memory) Instruction
 
     return .continue_;
 }
+
+test {
+    _ = @import("keccak_tests.zig");
+}

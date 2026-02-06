@@ -100,3 +100,7 @@ pub inline fn opGas(stack: *Stack, gas: *Gas) InstructionResult {
     stack.pushUnsafe(gas.remaining);
     return .continue_;
 }
+
+test {
+    _ = @import("control_tests.zig");
+}
