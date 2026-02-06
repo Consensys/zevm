@@ -45,19 +45,6 @@ pub const testing = struct {
         std.debug.print("Gas tests passed.\n", .{});
     }
 
-    pub fn testStack() !void {
-        var stack = Stack.new();
-        std.debug.assert(stack.len() == 0);
-
-        try stack.push(@as(primitives.U256, 1));
-        std.debug.assert(stack.len() == 1);
-
-        const value = stack.pop() orelse return error.StackEmpty;
-        std.debug.assert(value == @as(primitives.U256, 1));
-
-        std.debug.print("Stack tests passed.\n", .{});
-    }
-
     pub fn testMemory() !void {
         var memory = Memory.new();
         std.debug.assert(memory.size() == 0);

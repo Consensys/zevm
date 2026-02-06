@@ -328,6 +328,18 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
 
+    // Inline zig tests for interpreter module (stack, etc.)
+    const interpreter_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/interpreter/stack.zig" } },
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    interpreter_tests.root_module.addImport("primitives", primitives_module);
+    const run_interpreter_tests = b.addRunArtifact(interpreter_tests);
+    test_step.dependOn(&run_interpreter_tests.step);
+
     // Precompile unit tests - these are run via zig test command in CI
     // The command needs to link libc and include all modules
     // See .github/workflows/ci.yml for the full command
