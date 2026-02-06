@@ -321,6 +321,10 @@ pub fn build(b: *std.Build) void {
     bench_exe.root_module.addImport("handler", handler_module);
     bench_exe.root_module.addImport("inspector", inspector_module);
 
+    // Add zbench dependency for benchmarking
+    const zbench_dep = b.dependency("zbench", .{ .target = target, .optimize = .ReleaseFast });
+    bench_exe.root_module.addImport("zbench", zbench_dep.module("zbench"));
+
     b.installArtifact(bench_exe);
 
     // Run tests
