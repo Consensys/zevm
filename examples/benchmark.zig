@@ -68,7 +68,6 @@ fn benchmarkStackOperations() !void {
 
     const iterations = 100_000;
     var stack = interpreter.Stack.new();
-    defer stack.deinit();
 
     const start_time = std.time.nanoTimestamp();
 

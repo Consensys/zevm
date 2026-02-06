@@ -145,7 +145,6 @@ pub const FrameResult = struct {
     pub fn deinit(self: *FrameResult) void {
         self.result.deinit();
         self.memory.deinit();
-        self.stack.deinit();
     }
 };
 
