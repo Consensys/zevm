@@ -198,20 +198,59 @@ pub inline fn opKeccak256(stack: *Stack, gas: *Gas, memory: *Memory) Instruction
 
 ---
 
-## 📋 Infrastructure Gaps
+## 📋 Infrastructure Status
 
-### 1. Instruction Dispatch Table
-**Status:** ❌ Not implemented
+### 1. Instruction Dispatch Table ✅ IMPLEMENTED
+**Status:** ✅ Implemented (`instruction_table.zig`, 270 lines)
 
-The upstream doesn't include an instruction table system. Need to create:
-- 256-entry dispatch table mapping opcode → function pointer
-- Hardfork-specific table construction (e.g., PUSH0 only in Shanghai+)
-- Per-opcode base gas costs
-- Invalid opcode handling
+**Features:**
+- 256-entry instruction table with base gas costs
+- Hardfork-specific table construction (Frontier → Osaka)
+- Progressive opcode enablement per hardfork:
+  - **Homestead**: DELEGATECALL
+  - **Byzantium**: REVERT, RETURNDATASIZE, RETURNDATACOPY, STATICCALL, SHL, SHR, SAR
+  - **Constantinople**: CREATE2, EXTCODEHASH
+  - **Istanbul**: CHAINID, gas repricing
+  - **Berlin**: EIP-2929 cold/warm access costs
+  - **London**: BASEFEE
+  - **Shanghai**: PUSH0
+  - **Cancun**: TLOAD, TSTORE, MCOPY, BLOBHASH, BLOBBASEFEE
+  - **Osaka**: (no new opcodes)
+- Invalid opcode detection via `isOpcodeEnabled()`
+- Base gas cost lookup via `getBaseGasCost()`
 
-**Reference:** Previous implementation had `instruction_table.zig` (210 lines)
+**API:**
+```zig
+const table = instruction_table.makeInstructionTable(.shanghai);
+if (table.isOpcodeEnabled(opcode)) {
+    const gas = table.getBaseGasCost(opcode);
+}
+```
 
-### 2. Host Interface
+### 2. Gas Cost Module ✅ IMPLEMENTED
+**Status:** ✅ Implemented (`gas_costs.zig`, 220 lines)
+
+**Features:**
+- All EVM gas constants (G_BASE, G_VERYLOW, G_LOW, etc.)
+- Memory expansion cost calculation (quadratic formula)
+- Spec-dependent SLOAD costs:
+  - Pre-Istanbul: 200-800 gas
+  - Berlin+: 2100 (cold) / 100 (warm)
+- SSTORE gas cost calculation (EIP-2200, EIP-2929, EIP-3529):
+  - Handles original/current/new value combinations
+  - Refund calculations for clearing storage
+  - Cold/warm access costs
+- CALL gas cost calculation (EIP-2929)
+- Helper functions: `memoryExpansionCost()`, `toWordSize()`
+
+**API:**
+```zig
+const sload_cost = gas_costs.getSloadCost(.berlin, is_cold);
+const sstore_result = gas_costs.getSstoreCost(.london, original, current, new, is_cold);
+const expansion = gas_costs.memoryExpansionCost(current_words, new_words);
+```
+
+### 3. Host Interface
 **Status:** ❌ Not implemented
 
 Many opcodes require external state and environment access. Need:
@@ -228,7 +267,7 @@ Many opcodes require external state and environment access. Need:
 
 **Reference:** Previous implementation had `host.zig` (577 lines)
 
-### 3. Execution Loop Integration
+### 4. Execution Loop Integration
 **Status:** ⚠️ Partial
 
 The interpreter has execution infrastructure, but needs:
@@ -236,22 +275,9 @@ The interpreter has execution infrastructure, but needs:
 - Program counter management
 - Instruction result handling
 - Integration of all opcode signatures (Stack, Gas, Memory, Host, etc.)
+- Use of instruction table for validation and gas charging
 
 **Reference:** Previous implementation modified `interpreter.zig` with `run()` method
-
-### 4. Gas Cost Module
-**Status:** ⚠️ Partial
-
-Memory operations have local gas calculations. Need centralized:
-- Hardfork-specific gas constants
-- Dynamic gas cost functions:
-  - SSTORE (EIP-2200, EIP-2929, EIP-3529)
-  - CALL family (cold/warm access, value transfer, new account)
-  - CREATE (init code size, deposit)
-  - LOG (per byte, per topic)
-- Refund tracking and application
-
-**Reference:** Previous implementation had `gas_costs.zig` (232 lines)
 
 ---
 
@@ -397,25 +423,44 @@ const result = a & b;  // Built-in operator
 
 ## 🔍 File Locations
 
+### Infrastructure
+```
+src/interpreter/
+├── instruction_table.zig  # Hardfork-specific instruction tables (270 lines) ✅
+├── gas_costs.zig         # Gas constants and dynamic cost functions (220 lines) ✅
+└── opcodes/              # Opcode implementations
+    ├── main.zig              # Module exports
+    ├── arithmetic.zig        # 11 opcodes + tests ✅
+    ├── arithmetic_tests.zig  # ~90 tests ✅
+    ├── bitwise.zig          # 8 opcodes ✅
+    ├── bitwise_tests.zig    # 55 tests ✅
+    ├── comparison.zig       # 6 opcodes ✅
+    ├── comparison_tests.zig # 39 tests ✅
+    ├── stack.zig            # 18 opcodes ✅
+    ├── stack_tests.zig      # 42 tests ✅
+    ├── control.zig          # 6 opcodes ✅
+    ├── control_tests.zig    # 41 tests ✅
+    ├── memory.zig           # 5 opcodes ✅
+    ├── memory_tests.zig     # 38 tests ✅
+    ├── keccak.zig           # 1 opcode ✅
+    └── keccak_tests.zig     # 20 tests ✅
+```
+
+### Still to Create
 ```
 src/interpreter/opcodes/
-├── main.zig              # Module exports
-├── arithmetic.zig        # 11 opcodes: ADD, MUL, SUB, DIV, SDIV, MOD, SMOD, ADDMOD, MULMOD, EXP, SIGNEXTEND ✅
-├── bitwise.zig          # 8 opcodes: AND, OR, XOR, NOT, BYTE, SHL, SHR, SAR ✅
-├── comparison.zig       # 6 opcodes: LT, GT, SLT, SGT, EQ, ISZERO ✅
-├── stack.zig            # 18 opcodes: POP, PUSH0-32, DUP1-16, SWAP1-16 ✅
-├── control.zig          # 6 opcodes: STOP, JUMP, JUMPI, JUMPDEST, PC, GAS ✅
-├── memory.zig           # 5 opcodes: MLOAD, MSTORE, MSTORE8, MSIZE, MCOPY ✅
-└── keccak.zig           # 1 opcode: KECCAK256 ✅
+├── storage.zig         # SLOAD, SSTORE, TLOAD, TSTORE (requires Host)
+├── environment.zig     # 26 environment info opcodes (requires Host)
+├── system.zig          # RETURN, REVERT, LOG0-4, SELFDESTRUCT (requires Host)
+├── call.zig            # CALL, CALLCODE, DELEGATECALL, STATICCALL (requires Host + frames)
+└── create.zig          # CREATE, CREATE2 (requires Host + deployment)
+```
 
-# Still to create:
-# opcodes/storage.zig      # SLOAD, SSTORE, TLOAD, TSTORE
-# opcodes/environment.zig  # All environment info opcodes
-# opcodes/system.zig       # RETURN, REVERT, LOG, SELFDESTRUCT
-# opcodes/call.zig         # CALL, CALLCODE, DELEGATECALL, STATICCALL
-# opcodes/create.zig       # CREATE, CREATE2
+### Benchmarks
+```
+benchmarks/main.zig     # Comprehensive benchmarks for arithmetic + bitwise opcodes
 ```
 
 ---
 
-**Status Summary:** 55/99 opcodes implemented (56%), using fixed-size Stack API. 6 categories complete (Arithmetic ✅, Bitwise ✅, Comparison ✅, Stack ✅, Control ✅, Memory ✅, Keccak ✅). Host interface and instruction dispatch table are the main blockers for remaining 44 opcodes.
+**Status Summary:** 55/99 opcodes implemented (56%), with comprehensive test coverage (~325 tests). Hardfork-specific instruction tables and gas cost infrastructure complete. 7 opcode categories fully implemented with tests. Host interface is the main blocker for remaining 44 opcodes.

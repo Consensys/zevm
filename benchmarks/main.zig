@@ -1,25 +1,20 @@
 const std = @import("std");
 const primitives = @import("primitives");
 const interpreter = @import("interpreter");
+const bytecode = @import("bytecode");
 const zbench = @import("zbench");
+
+const InstructionTable = interpreter.instruction_table.InstructionTable;
+const gas_costs = interpreter.gas_costs;
 
 // ---------------------------------------------------------------------------
 // File-scope globals for hooks (hooks are fn() void, no parameters)
 // ---------------------------------------------------------------------------
 var g_stack: interpreter.Stack = interpreter.Stack.new();
 var g_gas: interpreter.Gas = interpreter.Gas.new(0);
+var g_spec: primitives.SpecId = .osaka; // Default to latest fork
+var g_instruction_table: InstructionTable = undefined;
 
-const ADD_GAS_COST = 3;
-const DIV_GAS_COST = 5;
-const SDIV_GAS_COST = 5;
-const MUL_GAS_COST = 5;
-const MOD_GAS_COST = 5;
-const SMOD_GAS_COST = 5;
-const SIGNEXTEND_GAS_COST = 5;
-const BITWISE_GAS_COST = 3; // AND, OR, XOR, NOT, BYTE, SHL, SHR, SAR
-const MID_GAS_COST = 8;
-const EXP_GAS_1BYTE: u64 = 10 + 50; // 1-byte exponent
-const EXP_GAS_32BYTE: u64 = 10 + 50 * 32; // 32-byte exponent
 const PREFILL = 900;
 const OPS_PER_BATCH = 400;
 const NUM_VALUES = 1024;
@@ -78,7 +73,8 @@ fn resetAdd() void {
     for (0..PREFILL) |i| {
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]);
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * ADD_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.ADD].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn benchOpAdd(_: std.mem.Allocator) void {
@@ -96,7 +92,8 @@ fn resetSub() void {
     for (0..PREFILL) |i| {
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]);
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * ADD_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.SUB].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn resetSubBorrow() void {
@@ -107,7 +104,8 @@ fn resetSubBorrow() void {
         g_stack.pushUnsafe(@as(primitives.U256, 1)); // b
         g_stack.pushUnsafe(@as(primitives.U256, 0)); // a
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * ADD_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.SUB].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn benchOpSub(_: std.mem.Allocator) void {
@@ -125,7 +123,8 @@ fn resetMul() void {
     for (0..PREFILL) |i| {
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]);
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * MUL_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.MUL].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn resetMulSmall() void {
@@ -136,7 +135,8 @@ fn resetMulSmall() void {
         g_stack.pushUnsafe(g_divisor_64); // b (small)
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // a (large)
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * MUL_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.MUL].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn benchOpMul(_: std.mem.Allocator) void {
@@ -156,7 +156,8 @@ fn resetDiv() void {
         g_stack.pushUnsafe(g_divisor_128); // b (divisor)
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // a (dividend)
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * DIV_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.DIV].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn resetDivSmall() void {
@@ -167,7 +168,8 @@ fn resetDivSmall() void {
         g_stack.pushUnsafe(g_divisor_64); // b (divisor)
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // a (dividend)
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * DIV_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.DIV].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn resetDivFull() void {
@@ -179,7 +181,8 @@ fn resetDivFull() void {
         g_stack.pushUnsafe(g_values[(i + 512) & (NUM_VALUES - 1)] | 1); // b (divisor)
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // a (dividend)
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * DIV_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.DIV].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn resetDivZero() void {
@@ -190,7 +193,8 @@ fn resetDivZero() void {
         g_stack.pushUnsafe(@as(primitives.U256, 0)); // b (divisor = 0)
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // a (dividend)
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * DIV_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.DIV].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn benchOpDiv(_: std.mem.Allocator) void {
@@ -209,7 +213,8 @@ fn resetMod() void {
         g_stack.pushUnsafe(g_divisor_128); // b (divisor)
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // a
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * MOD_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.MOD].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn resetModSmall() void {
@@ -219,7 +224,8 @@ fn resetModSmall() void {
         g_stack.pushUnsafe(g_divisor_64); // b (small divisor)
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // a
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * MOD_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.MOD].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn resetModZero() void {
@@ -229,7 +235,8 @@ fn resetModZero() void {
         g_stack.pushUnsafe(@as(primitives.U256, 0)); // b = 0
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // a
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * MOD_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.MOD].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn benchOpMod(_: std.mem.Allocator) void {
@@ -249,7 +256,8 @@ fn resetSdiv() void {
         g_stack.pushUnsafe(g_divisor_128); // b (divisor)
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // a (dividend)
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * SDIV_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.SDIV].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn resetSdivNegative() void {
@@ -261,7 +269,8 @@ fn resetSdivNegative() void {
         g_stack.pushUnsafe(g_divisor_128); // b (positive divisor)
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)] | sign_bit); // a (negative)
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * SDIV_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.SDIV].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn resetSdivBothNeg() void {
@@ -273,7 +282,8 @@ fn resetSdivBothNeg() void {
         g_stack.pushUnsafe(g_divisor_128 | sign_bit); // b (negative)
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)] | sign_bit); // a (negative)
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * SDIV_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.SDIV].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn benchOpSdiv(_: std.mem.Allocator) void {
@@ -292,7 +302,8 @@ fn resetSmod() void {
         g_stack.pushUnsafe(g_divisor_128); // b (divisor)
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // a
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * SMOD_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.SMOD].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn resetSmodNegative() void {
@@ -304,7 +315,8 @@ fn resetSmodNegative() void {
         g_stack.pushUnsafe(g_divisor_128); // b (positive divisor)
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)] | sign_bit); // a (negative)
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * SMOD_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.SMOD].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn benchOpSmod(_: std.mem.Allocator) void {
@@ -325,7 +337,8 @@ fn resetSignextend() void {
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // value
         g_stack.pushUnsafe(@as(primitives.U256, byte_pos)); // byte_pos
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * SIGNEXTEND_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.SIGNEXTEND].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn resetSignextendLow() void {
@@ -337,7 +350,8 @@ fn resetSignextendLow() void {
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // value
         g_stack.pushUnsafe(@as(primitives.U256, byte_pos)); // byte_pos
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * SIGNEXTEND_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.SIGNEXTEND].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn resetSignextendHigh() void {
@@ -349,7 +363,8 @@ fn resetSignextendHigh() void {
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // value
         g_stack.pushUnsafe(@as(primitives.U256, byte_pos)); // byte_pos
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * SIGNEXTEND_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.SIGNEXTEND].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn benchOpSignextend(_: std.mem.Allocator) void {
@@ -372,7 +387,8 @@ fn resetAddmod() void {
         g_stack.pushUnsafe(g_values[(i + 1) & (NUM_VALUES - 1)]); // b
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // a
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * MID_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.ADDMOD].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn resetAddmodOverflow() void {
@@ -385,7 +401,8 @@ fn resetAddmodOverflow() void {
         g_stack.pushUnsafe(MAX); // b = MAX
         g_stack.pushUnsafe(MAX); // a = MAX
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * MID_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.ADDMOD].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn benchOpAddmod(_: std.mem.Allocator) void {
@@ -406,7 +423,8 @@ fn resetMulmod() void {
         g_stack.pushUnsafe(g_values[(i + 1) & (NUM_VALUES - 1)]); // b
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // a
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * MID_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.ADDMOD].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn resetMulmodMax() void {
@@ -419,7 +437,8 @@ fn resetMulmodMax() void {
         g_stack.pushUnsafe(MAX); // b = MAX
         g_stack.pushUnsafe(MAX); // a = MAX
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * MID_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.ADDMOD].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn benchOpMulmod(_: std.mem.Allocator) void {
@@ -439,7 +458,9 @@ fn resetExpSmall() void {
         g_stack.pushUnsafe(g_small_exp[i & (NUM_VALUES - 1)]); // exponent (1 byte)
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // base
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * EXP_GAS_1BYTE + 1000);
+    const base_gas = g_instruction_table[bytecode.EXP].base_gas;
+    const gas_per_op = base_gas + gas_costs.G_EXPBYTE; // 1-byte exponent
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn resetExpLarge() void {
@@ -450,7 +471,9 @@ fn resetExpLarge() void {
         g_stack.pushUnsafe(g_values[(i + 512) & (NUM_VALUES - 1)]); // exponent (32 bytes)
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // base
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * EXP_GAS_32BYTE + 1000);
+    const base_gas = g_instruction_table[bytecode.EXP].base_gas;
+    const gas_per_op = base_gas + gas_costs.G_EXPBYTE * 32; // 32-byte exponent
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn benchOpExp(_: std.mem.Allocator) void {
@@ -468,7 +491,8 @@ fn resetAnd() void {
     for (0..PREFILL) |i| {
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]);
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * BITWISE_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.AND].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn benchOpAnd(_: std.mem.Allocator) void {
@@ -486,7 +510,8 @@ fn resetOr() void {
     for (0..PREFILL) |i| {
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]);
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * BITWISE_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.AND].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn benchOpOr(_: std.mem.Allocator) void {
@@ -504,7 +529,8 @@ fn resetXor() void {
     for (0..PREFILL) |i| {
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]);
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * BITWISE_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.AND].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn benchOpXor(_: std.mem.Allocator) void {
@@ -522,7 +548,8 @@ fn resetNot() void {
     for (0..PREFILL) |i| {
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]);
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * BITWISE_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.AND].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn benchOpNot(_: std.mem.Allocator) void {
@@ -542,7 +569,8 @@ fn resetByte() void {
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // value
         g_stack.pushUnsafe(@as(primitives.U256, i & 31)); // byte position (0-31)
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * BITWISE_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.AND].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn benchOpByte(_: std.mem.Allocator) void {
@@ -562,7 +590,8 @@ fn resetShl() void {
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // value
         g_stack.pushUnsafe(@as(primitives.U256, (i * 7) & 255)); // shift amount
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * BITWISE_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.AND].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn resetShlSmall() void {
@@ -573,7 +602,8 @@ fn resetShlSmall() void {
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // value
         g_stack.pushUnsafe(@as(primitives.U256, (i * 7) & 63)); // shift amount
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * BITWISE_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.AND].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn benchOpShl(_: std.mem.Allocator) void {
@@ -593,7 +623,8 @@ fn resetShr() void {
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // value
         g_stack.pushUnsafe(@as(primitives.U256, (i * 7) & 255)); // shift amount
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * BITWISE_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.AND].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn resetShrSmall() void {
@@ -604,7 +635,8 @@ fn resetShrSmall() void {
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)]); // value
         g_stack.pushUnsafe(@as(primitives.U256, (i * 7) & 63)); // shift amount
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * BITWISE_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.AND].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn benchOpShr(_: std.mem.Allocator) void {
@@ -626,7 +658,8 @@ fn resetSar() void {
         g_stack.pushUnsafe(if (i & 1 == 0) val else val | sign_bit); // alternate pos/neg
         g_stack.pushUnsafe(@as(primitives.U256, (i * 7) & 255)); // shift amount
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * BITWISE_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.AND].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn resetSarNegative() void {
@@ -638,7 +671,8 @@ fn resetSarNegative() void {
         g_stack.pushUnsafe(g_values[i & (NUM_VALUES - 1)] | sign_bit); // negative
         g_stack.pushUnsafe(@as(primitives.U256, (i * 7) & 255)); // shift amount
     }
-    g_gas = interpreter.Gas.new(OPS_PER_BATCH * BITWISE_GAS_COST + 1000);
+    const gas_per_op = g_instruction_table[bytecode.AND].base_gas;
+    g_gas = interpreter.Gas.new(OPS_PER_BATCH * gas_per_op + 1000);
 }
 
 fn benchOpSar(_: std.mem.Allocator) void {
@@ -676,29 +710,57 @@ fn getOpcodeCategory(name: []const u8) []const u8 {
 }
 
 fn gasCostForName(name: []const u8) f64 {
+    // Map benchmark name to opcode and get gas cost from instruction table
+    if (std.mem.startsWith(u8, name, "OP_ADD")) return @floatFromInt(g_instruction_table[bytecode.ADD].base_gas);
+    if (std.mem.startsWith(u8, name, "OP_SUB")) return @floatFromInt(g_instruction_table[bytecode.SUB].base_gas);
+    if (std.mem.startsWith(u8, name, "OP_MUL")) return @floatFromInt(g_instruction_table[bytecode.MUL].base_gas);
+    if (std.mem.startsWith(u8, name, "OP_DIV")) return @floatFromInt(g_instruction_table[bytecode.DIV].base_gas);
+    if (std.mem.startsWith(u8, name, "OP_SDIV")) return @floatFromInt(g_instruction_table[bytecode.SDIV].base_gas);
+    if (std.mem.startsWith(u8, name, "OP_MOD")) return @floatFromInt(g_instruction_table[bytecode.MOD].base_gas);
+    if (std.mem.startsWith(u8, name, "OP_SMOD")) return @floatFromInt(g_instruction_table[bytecode.SMOD].base_gas);
+    if (std.mem.startsWith(u8, name, "OP_SIGNEXTEND")) return @floatFromInt(g_instruction_table[bytecode.SIGNEXTEND].base_gas);
+    if (std.mem.startsWith(u8, name, "OP_ADDMOD")) return @floatFromInt(g_instruction_table[bytecode.ADDMOD].base_gas);
+    if (std.mem.startsWith(u8, name, "OP_MULMOD")) return @floatFromInt(g_instruction_table[bytecode.MULMOD].base_gas);
     if (std.mem.startsWith(u8, name, "OP_EXP")) {
-        if (std.mem.indexOf(u8, name, "32B")) |_| return @floatFromInt(EXP_GAS_32BYTE);
-        return @floatFromInt(EXP_GAS_1BYTE);
+        const base_gas = @as(f64, @floatFromInt(g_instruction_table[bytecode.EXP].base_gas));
+        const exp_byte_gas = @as(f64, @floatFromInt(gas_costs.G_EXPBYTE));
+        if (std.mem.indexOf(u8, name, "32B")) |_| return base_gas + exp_byte_gas * 32.0;
+        return base_gas + exp_byte_gas; // 1-byte exponent
     }
-    if (std.mem.startsWith(u8, name, "OP_ADDMOD") or std.mem.startsWith(u8, name, "OP_MULMOD"))
-        return @floatFromInt(MID_GAS_COST);
-    if (std.mem.startsWith(u8, name, "OP_DIV") or
-        std.mem.startsWith(u8, name, "OP_SDIV") or
-        std.mem.startsWith(u8, name, "OP_MUL") or
-        std.mem.startsWith(u8, name, "OP_MOD") or
-        std.mem.startsWith(u8, name, "OP_SMOD") or
-        std.mem.startsWith(u8, name, "OP_SIGNEXTEND"))
-        return @floatFromInt(DIV_GAS_COST);
-    if (std.mem.startsWith(u8, name, "OP_AND") or
-        std.mem.startsWith(u8, name, "OP_OR") or
-        std.mem.startsWith(u8, name, "OP_XOR") or
-        std.mem.startsWith(u8, name, "OP_NOT") or
-        std.mem.startsWith(u8, name, "OP_BYTE") or
-        std.mem.startsWith(u8, name, "OP_SHL") or
-        std.mem.startsWith(u8, name, "OP_SHR") or
-        std.mem.startsWith(u8, name, "OP_SAR"))
-        return @floatFromInt(BITWISE_GAS_COST);
-    return @floatFromInt(ADD_GAS_COST); // ADD, SUB
+    if (std.mem.startsWith(u8, name, "OP_AND")) return @floatFromInt(g_instruction_table[bytecode.AND].base_gas);
+    if (std.mem.startsWith(u8, name, "OP_OR")) return @floatFromInt(g_instruction_table[bytecode.OR].base_gas);
+    if (std.mem.startsWith(u8, name, "OP_XOR")) return @floatFromInt(g_instruction_table[bytecode.XOR].base_gas);
+    if (std.mem.startsWith(u8, name, "OP_NOT")) return @floatFromInt(g_instruction_table[bytecode.NOT].base_gas);
+    if (std.mem.startsWith(u8, name, "OP_BYTE")) return @floatFromInt(g_instruction_table[bytecode.BYTE].base_gas);
+    if (std.mem.startsWith(u8, name, "OP_SHL")) return @floatFromInt(g_instruction_table[bytecode.SHL].base_gas);
+    if (std.mem.startsWith(u8, name, "OP_SHR")) return @floatFromInt(g_instruction_table[bytecode.SHR].base_gas);
+    if (std.mem.startsWith(u8, name, "OP_SAR")) return @floatFromInt(g_instruction_table[bytecode.SAR].base_gas);
+    return 3.0; // Default fallback
+}
+
+fn parseSpecId(name: []const u8) ?primitives.SpecId {
+    if (std.mem.eql(u8, name, "frontier")) return .frontier;
+    if (std.mem.eql(u8, name, "frontier_thawing")) return .frontier_thawing;
+    if (std.mem.eql(u8, name, "homestead")) return .homestead;
+    if (std.mem.eql(u8, name, "dao_fork")) return .dao_fork;
+    if (std.mem.eql(u8, name, "tangerine")) return .tangerine;
+    if (std.mem.eql(u8, name, "spurious") or std.mem.eql(u8, name, "spurious_dragon")) return .spurious_dragon;
+    if (std.mem.eql(u8, name, "byzantium")) return .byzantium;
+    if (std.mem.eql(u8, name, "constantinople")) return .constantinople;
+    if (std.mem.eql(u8, name, "petersburg")) return .petersburg;
+    if (std.mem.eql(u8, name, "istanbul")) return .istanbul;
+    if (std.mem.eql(u8, name, "muir_glacier")) return .muir_glacier;
+    if (std.mem.eql(u8, name, "berlin")) return .berlin;
+    if (std.mem.eql(u8, name, "london")) return .london;
+    if (std.mem.eql(u8, name, "arrow_glacier")) return .arrow_glacier;
+    if (std.mem.eql(u8, name, "gray_glacier")) return .gray_glacier;
+    if (std.mem.eql(u8, name, "merge")) return .merge;
+    if (std.mem.eql(u8, name, "shanghai")) return .shanghai;
+    if (std.mem.eql(u8, name, "cancun")) return .cancun;
+    if (std.mem.eql(u8, name, "prague")) return .prague;
+    if (std.mem.eql(u8, name, "osaka")) return .osaka;
+    if (std.mem.eql(u8, name, "amsterdam")) return .amsterdam;
+    return null;
 }
 
 pub fn main() !void {
@@ -706,7 +768,31 @@ pub fn main() !void {
     const writer = &stdout.interface;
     const allocator = std.heap.page_allocator;
 
-    try writer.writeAll("\n=== ZEVM Opcode Benchmark (zBench) ===\n\n");
+    // Parse command-line arguments for fork selection
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
+    _ = args.skip(); // Skip program name
+
+    while (args.next()) |arg| {
+        if (std.mem.startsWith(u8, arg, "--fork=")) {
+            const fork_name = arg[7..]; // Skip "--fork="
+            if (parseSpecId(fork_name)) |spec| {
+                g_spec = spec;
+            } else {
+                try writer.print("Error: Unknown fork '{s}'\n", .{fork_name});
+                try writer.writeAll("Available forks: frontier, frontier_thawing, homestead, dao_fork, tangerine, ");
+                try writer.writeAll("spurious_dragon, byzantium, constantinople, petersburg, istanbul, muir_glacier, ");
+                try writer.writeAll("berlin, london, arrow_glacier, gray_glacier, merge, shanghai, cancun, prague, osaka, amsterdam\n");
+                return error.InvalidFork;
+            }
+        }
+    }
+
+    // Initialize instruction table for the selected fork
+    g_instruction_table = interpreter.instruction_table.makeInstructionTable(g_spec);
+
+    try writer.print("\n=== ZEVM Opcode Benchmark (zBench) ===\n", .{});
+    try writer.print("Fork: {s}\n\n", .{@tagName(g_spec)});
 
     var bench = zbench.Benchmark.init(allocator, .{});
     defer bench.deinit();
