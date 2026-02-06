@@ -763,15 +763,44 @@ fn parseSpecId(name: []const u8) ?primitives.SpecId {
     return null;
 }
 
+fn matchesFilter(name: []const u8, filter: []const u8) bool {
+    if (filter.len == 0) return true;
+
+    // Simple case-insensitive substring matching
+    var name_lower_buf: [256]u8 = undefined;
+    var filter_lower_buf: [256]u8 = undefined;
+
+    if (name.len > name_lower_buf.len or filter.len > filter_lower_buf.len) {
+        return false;
+    }
+
+    // Convert to lowercase for case-insensitive matching
+    for (name, 0..) |c, i| {
+        name_lower_buf[i] = std.ascii.toLower(c);
+    }
+    for (filter, 0..) |c, i| {
+        filter_lower_buf[i] = std.ascii.toLower(c);
+    }
+
+    const name_lower = name_lower_buf[0..name.len];
+    const filter_lower = filter_lower_buf[0..filter.len];
+
+    // Check if filter is a substring of name
+    return std.mem.indexOf(u8, name_lower, filter_lower) != null;
+}
+
+
 pub fn main() !void {
     var stdout = std.fs.File.stdout().writerStreaming(&.{});
     const writer = &stdout.interface;
     const allocator = std.heap.page_allocator;
 
-    // Parse command-line arguments for fork selection
+    // Parse command-line arguments for fork selection and filter
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
     _ = args.skip(); // Skip program name
+
+    var filter: []const u8 = "";
 
     while (args.next()) |arg| {
         if (std.mem.startsWith(u8, arg, "--fork=")) {
@@ -785,6 +814,8 @@ pub fn main() !void {
                 try writer.writeAll("berlin, london, arrow_glacier, gray_glacier, merge, shanghai, cancun, prague, osaka, amsterdam\n");
                 return error.InvalidFork;
             }
+        } else if (std.mem.startsWith(u8, arg, "--filter=")) {
+            filter = arg[9..]; // Skip "--filter="
         }
     }
 
@@ -792,122 +823,53 @@ pub fn main() !void {
     g_instruction_table = interpreter.instruction_table.makeInstructionTable(g_spec);
 
     try writer.print("\n=== ZEVM Opcode Benchmark (zBench) ===\n", .{});
-    try writer.print("Fork: {s}\n\n", .{@tagName(g_spec)});
+    try writer.print("Fork: {s}\n", .{@tagName(g_spec)});
+    if (filter.len > 0) {
+        try writer.print("Filter: {s}\n", .{filter});
+    }
+    try writer.writeAll("\n");
 
     var bench = zbench.Benchmark.init(allocator, .{});
     defer bench.deinit();
 
-    try bench.add("OP_ADD", benchOpAdd, .{
-        .hooks = .{ .before_each = resetAdd },
-    });
-    try bench.add("OP_SUB", benchOpSub, .{
-        .hooks = .{ .before_each = resetSub },
-    });
-    try bench.add("OP_SUB (borrow)", benchOpSub, .{
-        .hooks = .{ .before_each = resetSubBorrow },
-    });
-    try bench.add("OP_MUL", benchOpMul, .{
-        .hooks = .{ .before_each = resetMul },
-    });
-    try bench.add("OP_MUL (256x64)", benchOpMul, .{
-        .hooks = .{ .before_each = resetMulSmall },
-    });
-    try bench.add("OP_DIV", benchOpDiv, .{
-        .hooks = .{ .before_each = resetDiv },
-    });
-    try bench.add("OP_DIV (256/256)", benchOpDiv, .{
-        .hooks = .{ .before_each = resetDivFull },
-    });
-    try bench.add("OP_DIV (256/64)", benchOpDiv, .{
-        .hooks = .{ .before_each = resetDivSmall },
-    });
-    try bench.add("OP_DIV (zero)", benchOpDiv, .{
-        .hooks = .{ .before_each = resetDivZero },
-    });
-    try bench.add("OP_MOD", benchOpMod, .{
-        .hooks = .{ .before_each = resetMod },
-    });
-    try bench.add("OP_MOD (256/64)", benchOpMod, .{
-        .hooks = .{ .before_each = resetModSmall },
-    });
-    try bench.add("OP_MOD (zero)", benchOpMod, .{
-        .hooks = .{ .before_each = resetModZero },
-    });
-    try bench.add("OP_SDIV", benchOpSdiv, .{
-        .hooks = .{ .before_each = resetSdiv },
-    });
-    try bench.add("OP_SDIV (neg/pos)", benchOpSdiv, .{
-        .hooks = .{ .before_each = resetSdivNegative },
-    });
-    try bench.add("OP_SDIV (neg/neg)", benchOpSdiv, .{
-        .hooks = .{ .before_each = resetSdivBothNeg },
-    });
-    try bench.add("OP_SMOD", benchOpSmod, .{
-        .hooks = .{ .before_each = resetSmod },
-    });
-    try bench.add("OP_SMOD (neg div)", benchOpSmod, .{
-        .hooks = .{ .before_each = resetSmodNegative },
-    });
-    try bench.add("OP_SIGNEXTEND", benchOpSignextend, .{
-        .hooks = .{ .before_each = resetSignextend },
-    });
-    try bench.add("OP_SIGNEXTEND (0-3)", benchOpSignextend, .{
-        .hooks = .{ .before_each = resetSignextendLow },
-    });
-    try bench.add("OP_SIGNEXTEND (28-31)", benchOpSignextend, .{
-        .hooks = .{ .before_each = resetSignextendHigh },
-    });
-    try bench.add("OP_ADDMOD", benchOpAddmod, .{
-        .hooks = .{ .before_each = resetAddmod },
-    });
-    try bench.add("OP_ADDMOD (MAX)", benchOpAddmod, .{
-        .hooks = .{ .before_each = resetAddmodOverflow },
-    });
-    try bench.add("OP_MULMOD", benchOpMulmod, .{
-        .hooks = .{ .before_each = resetMulmod },
-    });
-    try bench.add("OP_MULMOD (MAX)", benchOpMulmod, .{
-        .hooks = .{ .before_each = resetMulmodMax },
-    });
-    try bench.add("OP_EXP (1B)", benchOpExp, .{
-        .hooks = .{ .before_each = resetExpSmall },
-    });
-    try bench.add("OP_EXP (32B)", benchOpExp, .{
-        .hooks = .{ .before_each = resetExpLarge },
-    });
-    try bench.add("OP_AND", benchOpAnd, .{
-        .hooks = .{ .before_each = resetAnd },
-    });
-    try bench.add("OP_OR", benchOpOr, .{
-        .hooks = .{ .before_each = resetOr },
-    });
-    try bench.add("OP_XOR", benchOpXor, .{
-        .hooks = .{ .before_each = resetXor },
-    });
-    try bench.add("OP_NOT", benchOpNot, .{
-        .hooks = .{ .before_each = resetNot },
-    });
-    try bench.add("OP_BYTE", benchOpByte, .{
-        .hooks = .{ .before_each = resetByte },
-    });
-    try bench.add("OP_SHL", benchOpShl, .{
-        .hooks = .{ .before_each = resetShl },
-    });
-    try bench.add("OP_SHL (0-63)", benchOpShl, .{
-        .hooks = .{ .before_each = resetShlSmall },
-    });
-    try bench.add("OP_SHR", benchOpShr, .{
-        .hooks = .{ .before_each = resetShr },
-    });
-    try bench.add("OP_SHR (0-63)", benchOpShr, .{
-        .hooks = .{ .before_each = resetShrSmall },
-    });
-    try bench.add("OP_SAR", benchOpSar, .{
-        .hooks = .{ .before_each = resetSar },
-    });
-    try bench.add("OP_SAR (negative)", benchOpSar, .{
-        .hooks = .{ .before_each = resetSarNegative },
-    });
+    // Only add benchmarks that match the filter
+    if (matchesFilter("OP_ADD", filter)) try bench.add("OP_ADD", benchOpAdd, .{ .hooks = .{ .before_each = resetAdd } });
+    if (matchesFilter("OP_SUB", filter)) try bench.add("OP_SUB", benchOpSub, .{ .hooks = .{ .before_each = resetSub } });
+    if (matchesFilter("OP_SUB (borrow)", filter)) try bench.add("OP_SUB (borrow)", benchOpSub, .{ .hooks = .{ .before_each = resetSubBorrow } });
+    if (matchesFilter("OP_MUL", filter)) try bench.add("OP_MUL", benchOpMul, .{ .hooks = .{ .before_each = resetMul } });
+    if (matchesFilter("OP_MUL (256x64)", filter)) try bench.add("OP_MUL (256x64)", benchOpMul, .{ .hooks = .{ .before_each = resetMulSmall } });
+    if (matchesFilter("OP_DIV", filter)) try bench.add("OP_DIV", benchOpDiv, .{ .hooks = .{ .before_each = resetDiv } });
+    if (matchesFilter("OP_DIV (256/256)", filter)) try bench.add("OP_DIV (256/256)", benchOpDiv, .{ .hooks = .{ .before_each = resetDivFull } });
+    if (matchesFilter("OP_DIV (256/64)", filter)) try bench.add("OP_DIV (256/64)", benchOpDiv, .{ .hooks = .{ .before_each = resetDivSmall } });
+    if (matchesFilter("OP_DIV (zero)", filter)) try bench.add("OP_DIV (zero)", benchOpDiv, .{ .hooks = .{ .before_each = resetDivZero } });
+    if (matchesFilter("OP_MOD", filter)) try bench.add("OP_MOD", benchOpMod, .{ .hooks = .{ .before_each = resetMod } });
+    if (matchesFilter("OP_MOD (256/64)", filter)) try bench.add("OP_MOD (256/64)", benchOpMod, .{ .hooks = .{ .before_each = resetModSmall } });
+    if (matchesFilter("OP_MOD (zero)", filter)) try bench.add("OP_MOD (zero)", benchOpMod, .{ .hooks = .{ .before_each = resetModZero } });
+    if (matchesFilter("OP_SDIV", filter)) try bench.add("OP_SDIV", benchOpSdiv, .{ .hooks = .{ .before_each = resetSdiv } });
+    if (matchesFilter("OP_SDIV (neg/pos)", filter)) try bench.add("OP_SDIV (neg/pos)", benchOpSdiv, .{ .hooks = .{ .before_each = resetSdivNegative } });
+    if (matchesFilter("OP_SDIV (neg/neg)", filter)) try bench.add("OP_SDIV (neg/neg)", benchOpSdiv, .{ .hooks = .{ .before_each = resetSdivBothNeg } });
+    if (matchesFilter("OP_SMOD", filter)) try bench.add("OP_SMOD", benchOpSmod, .{ .hooks = .{ .before_each = resetSmod } });
+    if (matchesFilter("OP_SMOD (neg div)", filter)) try bench.add("OP_SMOD (neg div)", benchOpSmod, .{ .hooks = .{ .before_each = resetSmodNegative } });
+    if (matchesFilter("OP_SIGNEXTEND", filter)) try bench.add("OP_SIGNEXTEND", benchOpSignextend, .{ .hooks = .{ .before_each = resetSignextend } });
+    if (matchesFilter("OP_SIGNEXTEND (0-3)", filter)) try bench.add("OP_SIGNEXTEND (0-3)", benchOpSignextend, .{ .hooks = .{ .before_each = resetSignextendLow } });
+    if (matchesFilter("OP_SIGNEXTEND (28-31)", filter)) try bench.add("OP_SIGNEXTEND (28-31)", benchOpSignextend, .{ .hooks = .{ .before_each = resetSignextendHigh } });
+    if (matchesFilter("OP_ADDMOD", filter)) try bench.add("OP_ADDMOD", benchOpAddmod, .{ .hooks = .{ .before_each = resetAddmod } });
+    if (matchesFilter("OP_ADDMOD (MAX)", filter)) try bench.add("OP_ADDMOD (MAX)", benchOpAddmod, .{ .hooks = .{ .before_each = resetAddmodOverflow } });
+    if (matchesFilter("OP_MULMOD", filter)) try bench.add("OP_MULMOD", benchOpMulmod, .{ .hooks = .{ .before_each = resetMulmod } });
+    if (matchesFilter("OP_MULMOD (MAX)", filter)) try bench.add("OP_MULMOD (MAX)", benchOpMulmod, .{ .hooks = .{ .before_each = resetMulmodMax } });
+    if (matchesFilter("OP_EXP (1B)", filter)) try bench.add("OP_EXP (1B)", benchOpExp, .{ .hooks = .{ .before_each = resetExpSmall } });
+    if (matchesFilter("OP_EXP (32B)", filter)) try bench.add("OP_EXP (32B)", benchOpExp, .{ .hooks = .{ .before_each = resetExpLarge } });
+    if (matchesFilter("OP_AND", filter)) try bench.add("OP_AND", benchOpAnd, .{ .hooks = .{ .before_each = resetAnd } });
+    if (matchesFilter("OP_OR", filter)) try bench.add("OP_OR", benchOpOr, .{ .hooks = .{ .before_each = resetOr } });
+    if (matchesFilter("OP_XOR", filter)) try bench.add("OP_XOR", benchOpXor, .{ .hooks = .{ .before_each = resetXor } });
+    if (matchesFilter("OP_NOT", filter)) try bench.add("OP_NOT", benchOpNot, .{ .hooks = .{ .before_each = resetNot } });
+    if (matchesFilter("OP_BYTE", filter)) try bench.add("OP_BYTE", benchOpByte, .{ .hooks = .{ .before_each = resetByte } });
+    if (matchesFilter("OP_SHL", filter)) try bench.add("OP_SHL", benchOpShl, .{ .hooks = .{ .before_each = resetShl } });
+    if (matchesFilter("OP_SHL (0-63)", filter)) try bench.add("OP_SHL (0-63)", benchOpShl, .{ .hooks = .{ .before_each = resetShlSmall } });
+    if (matchesFilter("OP_SHR", filter)) try bench.add("OP_SHR", benchOpShr, .{ .hooks = .{ .before_each = resetShr } });
+    if (matchesFilter("OP_SHR (0-63)", filter)) try bench.add("OP_SHR (0-63)", benchOpShr, .{ .hooks = .{ .before_each = resetShrSmall } });
+    if (matchesFilter("OP_SAR", filter)) try bench.add("OP_SAR", benchOpSar, .{ .hooks = .{ .before_each = resetSar } });
+    if (matchesFilter("OP_SAR (negative)", filter)) try bench.add("OP_SAR (negative)", benchOpSar, .{ .hooks = .{ .before_each = resetSarNegative } });
 
     try writer.print("{s:<20}{s:<10}{s:<15}{s:<24}{s:<30}{s:<12}{s:<12}{s}\n", .{
         "benchmark", "runs", "total time", "time/op (avg ± σ)", "(min ... max)", "p75", "p99", "MGas/sec",
