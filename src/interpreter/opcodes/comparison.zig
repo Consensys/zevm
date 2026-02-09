@@ -43,8 +43,8 @@ pub inline fn opSlt(stack: *Stack, gas: *Gas) InstructionResult {
     const a_negative = (a >> 255) == 1;
     const b_negative = (b >> 255) == 1;
 
-    const result = if (a_negative == b_negative)
-        if (a < b) @as(primitives.U256, 1) else 0
+    const result: primitives.U256 = if (a_negative == b_negative)
+        (if (a < b) @as(primitives.U256, 1) else 0)
     else if (a_negative)
         1 // negative < positive
     else
@@ -67,8 +67,8 @@ pub inline fn opSgt(stack: *Stack, gas: *Gas) InstructionResult {
     const a_negative = (a >> 255) == 1;
     const b_negative = (b >> 255) == 1;
 
-    const result = if (a_negative == b_negative)
-        if (a > b) @as(primitives.U256, 1) else 0
+    const result: primitives.U256 = if (a_negative == b_negative)
+        (if (a > b) @as(primitives.U256, 1) else 0)
     else if (b_negative)
         1 // positive > negative
     else
