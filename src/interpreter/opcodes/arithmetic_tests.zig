@@ -653,6 +653,237 @@ test "mulmod helper" {
     try expectEqual(@as(U, 0), arithmetic.mulmod(MAX, MAX, MAX));
 }
 
+// --- toLimbs / fromLimbs round-trip tests ---
+
+test "toLimbs/fromLimbs: zero" {
+    const limbs = arithmetic.toLimbs(0);
+    try expectEqual([4]u64{ 0, 0, 0, 0 }, limbs);
+    try expectEqual(@as(U, 0), arithmetic.fromLimbs(limbs));
+}
+
+test "toLimbs/fromLimbs: one" {
+    const limbs = arithmetic.toLimbs(1);
+    try expectEqual([4]u64{ 1, 0, 0, 0 }, limbs);
+    try expectEqual(@as(U, 1), arithmetic.fromLimbs(limbs));
+}
+
+test "toLimbs/fromLimbs: MAX" {
+    const limbs = arithmetic.toLimbs(MAX);
+    const max64 = std.math.maxInt(u64);
+    try expectEqual([4]u64{ max64, max64, max64, max64 }, limbs);
+    try expectEqual(MAX, arithmetic.fromLimbs(limbs));
+}
+
+test "toLimbs/fromLimbs: powers of 2^64" {
+    // 2^64
+    const v1: U = @as(U, 1) << 64;
+    const l1 = arithmetic.toLimbs(v1);
+    try expectEqual([4]u64{ 0, 1, 0, 0 }, l1);
+    try expectEqual(v1, arithmetic.fromLimbs(l1));
+
+    // 2^128
+    const v2: U = @as(U, 1) << 128;
+    const l2 = arithmetic.toLimbs(v2);
+    try expectEqual([4]u64{ 0, 0, 1, 0 }, l2);
+    try expectEqual(v2, arithmetic.fromLimbs(l2));
+
+    // 2^192
+    const v3: U = @as(U, 1) << 192;
+    const l3 = arithmetic.toLimbs(v3);
+    try expectEqual([4]u64{ 0, 0, 0, 1 }, l3);
+    try expectEqual(v3, arithmetic.fromLimbs(l3));
+}
+
+// --- mulFull tests ---
+
+test "mulFull: small values 3 * 4 = 12" {
+    const result = arithmetic.mulFull(3, 4);
+    try expectEqual(@as(u64, 12), result[0]);
+    for (1..8) |i| {
+        try expectEqual(@as(u64, 0), result[i]);
+    }
+}
+
+test "mulFull: MAX * MAX" {
+    // MAX * MAX = (2^256 - 1)^2 = 2^512 - 2^257 + 1
+    // In 512-bit limbs: low 256 bits = 1, high 256 bits = MAX - 1
+    const result = arithmetic.mulFull(MAX, MAX);
+    // Low limbs: 0x0000...0001
+    try expectEqual(@as(u64, 1), result[0]);
+    try expectEqual(@as(u64, 0), result[1]);
+    try expectEqual(@as(u64, 0), result[2]);
+    try expectEqual(@as(u64, 0), result[3]);
+    // High limbs: MAX - 1 = 0xFFFF...FFFE
+    const max64 = std.math.maxInt(u64);
+    try expectEqual(max64 - 1, result[4]);
+    try expectEqual(max64, result[5]);
+    try expectEqual(max64, result[6]);
+    try expectEqual(max64, result[7]);
+}
+
+test "mulFull: MAX * 2" {
+    // MAX * 2 = 2^257 - 2 → low 256 = MAX - 1, high limbs = [1, 0, 0, 0]
+    const result = arithmetic.mulFull(MAX, 2);
+    const max64 = std.math.maxInt(u64);
+    try expectEqual(max64 - 1, result[0]);
+    try expectEqual(max64, result[1]);
+    try expectEqual(max64, result[2]);
+    try expectEqual(max64, result[3]);
+    try expectEqual(@as(u64, 1), result[4]);
+    try expectEqual(@as(u64, 0), result[5]);
+    try expectEqual(@as(u64, 0), result[6]);
+    try expectEqual(@as(u64, 0), result[7]);
+}
+
+// --- mod512by256 tests ---
+
+test "mod512by256: divisor is 1" {
+    // Any value mod 1 = 0
+    const product = arithmetic.mulFull(MAX, MAX);
+    try expectEqual(@as(U, 0), arithmetic.mod512by256(product, arithmetic.toLimbs(1)));
+}
+
+test "mod512by256: divisor is power of 2" {
+    // (MAX * 2) mod (2^128) = (2^257 - 2) mod 2^128
+    // low 128 bits of (2^257 - 2) = MAX_128 - 1 = 2^128 - 2
+    const product = arithmetic.mulFull(MAX, 2);
+    const mod: U = @as(U, 1) << 128;
+    const expected: U = mod - 2;
+    try expectEqual(expected, arithmetic.mod512by256(product, arithmetic.toLimbs(mod)));
+}
+
+// --- Additional mulmod edge cases ---
+
+test "mulmod: (MAX-1) * (MAX-1) % MAX" {
+    // (MAX-1)^2 = MAX^2 - 2*MAX + 1
+    // MAX^2 mod MAX = 0, so result = (-2*MAX + 1) mod MAX = 1
+    try expectEqual(@as(U, 1), arithmetic.mulmod(MAX - 1, MAX - 1, MAX));
+}
+
+test "mulmod: prime modulus" {
+    // Use a known prime and verify against known result
+    // 7 * 13 = 91; 91 mod 17 = 91 - 5*17 = 91 - 85 = 6
+    try expectEqual(@as(U, 6), arithmetic.mulmod(7, 13, 17));
+}
+
+test "mulmod: small * large" {
+    // 2 * MAX = 2^257 - 2; mod (MAX) = (2^257 - 2) mod (2^256 - 1)
+    // 2^257 - 2 = 2*(2^256 - 1) = 2*MAX, so 2*MAX mod MAX = 0
+    try expectEqual(@as(U, 0), arithmetic.mulmod(2, MAX, MAX));
+}
+
+test "mulmod: a=0 returns 0" {
+    try expectEqual(@as(U, 0), arithmetic.mulmod(0, MAX, 7));
+}
+
+test "mulmod: b=0 returns 0" {
+    try expectEqual(@as(U, 0), arithmetic.mulmod(MAX, 0, 7));
+}
+
+test "mulmod: n=1 returns 0" {
+    try expectEqual(@as(U, 0), arithmetic.mulmod(42, 99, 1));
+}
+
+test "mulmod: product fits in 256 bits" {
+    // 100 * 200 = 20000; 20000 mod 7 = 2857*7 + 1 = 1
+    try expectEqual(@as(U, 1), arithmetic.mulmod(100, 200, 7));
+}
+
+// --- Additional addmod edge cases ---
+
+test "addmod: both inputs larger than n" {
+    // (100 + 200) % 7 = 300 % 7 = 6
+    try expectEqual(@as(U, 6), arithmetic.addmod(100, 200, 7));
+}
+
+test "addmod: carry case with large n" {
+    // MAX + MAX = 2^257 - 2; mod (MAX - 1) = (2^257 - 2) mod (2^256 - 2)
+    // = 2*(2^256 - 1) mod (2^256 - 2) = 2*MAX mod (MAX - 1)
+    // MAX mod (MAX-1) = 1, so 2*MAX mod (MAX-1) = 2
+    const n = MAX - 1;
+    try expectEqual(@as(U, 2), arithmetic.addmod(MAX, MAX, n));
+}
+
+test "addmod: n=1 always returns 0" {
+    try expectEqual(@as(U, 0), arithmetic.addmod(42, 99, 1));
+    try expectEqual(@as(U, 0), arithmetic.addmod(MAX, MAX, 1));
+}
+
+// --- div128by64 tests ---
+
+test "div128by64: basic small division" {
+    // 12 / (1 << 63) with hi=0 → q=0, r=12 after normalization
+    // Use a pre-normalized divisor (MSB set): d = 1 << 63
+    const d: u64 = @as(u64, 1) << 63;
+    const result = arithmetic.div128by64(0, 12, d);
+    try expectEqual(@as(u64, 0), result.q);
+    try expectEqual(@as(u64, 12), result.r);
+}
+
+test "div128by64: known value" {
+    // (1 << 64) / (1 << 63) = 2 remainder 0
+    // hi=1, lo=0, d=1<<63 → but precondition is hi < d
+    // So use hi=0, lo=2*(1<<63)=0 with carry... let's pick a concrete example.
+    // 0x0000000000000001:0000000000000000 / 0x8000000000000000 = 2, r=0
+    // hi=1, lo=0, d=0x8000000000000000. hi < d? 1 < 0x80...0? Yes.
+    const d: u64 = @as(u64, 1) << 63;
+    const result = arithmetic.div128by64(1, 0, d);
+    try expectEqual(@as(u64, 2), result.q);
+    try expectEqual(@as(u64, 0), result.r);
+}
+
+test "div128by64: max dividend below overflow" {
+    // hi = d-1, lo = MAX64, d = 1<<63
+    // This is (d-1)*2^64 + MAX64 divided by d
+    const d: u64 = @as(u64, 1) << 63;
+    const max64 = std.math.maxInt(u64);
+    const result = arithmetic.div128by64(d - 1, max64, d);
+    // Quotient should be MAX64 (since (d-1)*2^64 + MAX64 = d*MAX64 + (MAX64 - d + 1)... let's verify)
+    // (d-1)*2^64 + (2^64-1) = d*2^64 - 2^64 + 2^64 - 1 = d*2^64 - 1
+    // d*2^64 - 1 = d*(2^64-1) + d - 1, so q = 2^64-1, r = d-1
+    try expectEqual(max64, result.q);
+    try expectEqual(d - 1, result.r);
+}
+
+test "div128by64: divisor all ones" {
+    const max64 = std.math.maxInt(u64);
+    const d = max64; // MSB is set
+    // (max64-1):max64 / max64
+    // = (max64-1)*2^64 + max64 / max64
+    // = (max64^2 - 2^64 + max64) / max64 ... let's compute directly
+    // Numerator: (max64-1)*2^64 + max64 = max64*(2^64) - 2^64 + max64 = max64*(max64+1) - (max64+1) = (max64-1)*(max64+1) = max64^2 - 1
+    // max64^2 - 1 / max64 = max64 - 1 remainder max64 - 1 ... wait
+    // Actually max64^2 / max64 = max64, remainder 0. max64^2 - 1 / max64 = max64 - 1 remainder max64 - (max64-1)*max64 ...
+    // Let me just compute: (max64-1) * 2^64 + max64. We know 2^64 = max64 + 1.
+    // = (max64-1)*(max64+1) + max64 = max64^2 - 1 + max64 = max64^2 + max64 - 1
+    // Divide by max64: q = max64 + 1 = 2^64? No, that overflows. Let me reconsider.
+    // hi must be < d. hi = max64-1 < max64 = d. OK.
+    // Actually (max64-1)*2^64 + max64 = max64*(max64-1+1) + max64 - (max64-1) = ... let me just trust the algorithm.
+    const result = arithmetic.div128by64(max64 - 1, max64, d);
+    // Verify: q * d + r = (hi << 64) | lo
+    const check: u128 = @as(u128, result.q) * d + result.r;
+    const expected: u128 = (@as(u128, max64 - 1) << 64) | max64;
+    try expectEqual(expected, check);
+}
+
+// --- limbLessThan tests ---
+
+test "limbLessThan: equal values" {
+    try expectEqual(false, arithmetic.limbLessThan(.{ 1, 2, 3, 4 }, .{ 1, 2, 3, 4 }));
+}
+
+test "limbLessThan: less in high limb" {
+    try expectEqual(true, arithmetic.limbLessThan(.{ 1, 2, 3, 4 }, .{ 1, 2, 3, 5 }));
+}
+
+test "limbLessThan: greater in high limb" {
+    try expectEqual(false, arithmetic.limbLessThan(.{ 1, 2, 3, 5 }, .{ 1, 2, 3, 4 }));
+}
+
+test "limbLessThan: less in low limb" {
+    try expectEqual(true, arithmetic.limbLessThan(.{ 0, 0, 0, 0 }, .{ 1, 0, 0, 0 }));
+}
+
 test "expMod256 helper" {
     try expectEqual(@as(U, 1), arithmetic.expMod256(2, 0));
     try expectEqual(@as(U, 1024), arithmetic.expMod256(2, 10));
