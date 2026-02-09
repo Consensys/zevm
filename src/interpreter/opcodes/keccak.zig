@@ -48,11 +48,12 @@ pub inline fn opKeccak256(stack: *Stack, gas: *Gas, memory: *Memory) Instruction
     var hash: [32]u8 = undefined;
     std.crypto.hash.sha3.Keccak256.hash(data, &hash, .{});
 
-    // Convert hash to U256 (big-endian)
-    var value: primitives.U256 = 0;
-    for (hash) |byte| {
-        value = (value << 8) | byte;
-    }
+    // Convert hash to U256 (big-endian, 4 bulk u64 reads)
+    const U = primitives.U256;
+    const value: U = (@as(U, std.mem.readInt(u64, hash[0..8], .big)) << 192) |
+        (@as(U, std.mem.readInt(u64, hash[8..16], .big)) << 128) |
+        (@as(U, std.mem.readInt(u64, hash[16..24], .big)) << 64) |
+        @as(U, std.mem.readInt(u64, hash[24..32], .big));
 
     // Replace top 2 stack items with hash result
     stack.shrinkUnsafe(1);

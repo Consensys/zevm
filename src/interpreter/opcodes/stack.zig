@@ -27,21 +27,30 @@ pub inline fn opPush0(stack: *Stack, gas: *Gas) InstructionResult {
 
 /// Generic PUSH operation for PUSH1-PUSH32
 /// Reads N bytes from bytecode and pushes as U256
-pub inline fn opPushN(stack: *Stack, gas: *Gas, bytecode: []const u8, pc: *usize, n: u8) InstructionResult {
+pub inline fn opPushN(stack: *Stack, gas: *Gas, code: []const u8, pc: *usize, n: u8) InstructionResult {
     if (!stack.hasSpace(1)) return .stack_overflow;
     if (!gas.spend(GAS_VERYLOW)) return .out_of_gas;
 
-    // Read n bytes from bytecode after current PC
-    var value: primitives.U256 = 0;
     const start = pc.* + 1;
-    const end = @min(start + n, bytecode.len);
+    const available = if (start < code.len) code.len - start else 0;
+    const to_read: usize = @min(@as(usize, n), available);
 
-    for (start..end) |i| {
-        value = (value << 8) | bytecode[i];
+    // Zero-padded 32-byte big-endian buffer; n bytes go right-aligned
+    var buf: [32]u8 = .{0} ** 32;
+    if (to_read > 0) {
+        @memcpy(buf[32 - to_read ..], code[start .. start + to_read]);
     }
 
+    // Read four big-endian u64 limbs and assemble U256
+    // (4 native-width loads + bswaps, then 3 constant shifts + ORs)
+    const U = primitives.U256;
+    const value: U = (@as(U, std.mem.readInt(u64, buf[0..8], .big)) << 192) |
+        (@as(U, std.mem.readInt(u64, buf[8..16], .big)) << 128) |
+        (@as(U, std.mem.readInt(u64, buf[16..24], .big)) << 64) |
+        @as(U, std.mem.readInt(u64, buf[24..32], .big));
+
     stack.pushUnsafe(value);
-    pc.* = pc.* + n; // Skip the immediate bytes
+    pc.* += n;
     return .continue_;
 }
 

@@ -15,6 +15,7 @@ const bitwise_bench = @import("bitwise.zig");
 const comparison_bench = @import("comparison.zig");
 const memory_bench = @import("memory.zig");
 const keccak_bench = @import("keccak.zig");
+const stack_bench = @import("stack.zig");
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -34,6 +35,8 @@ pub var g_gas: interpreter.Gas = interpreter.Gas.new(0);
 pub var g_memory: interpreter.Memory = interpreter.Memory.new();
 var g_spec: primitives.SpecId = .osaka; // Default to latest fork
 pub var g_instruction_table: InstructionTable = undefined;
+pub var g_bytecode: [32 * 1024]u8 = undefined;
+pub var g_pc: usize = 0;
 
 // ---------------------------------------------------------------------------
 // Reproducible test data
@@ -69,6 +72,7 @@ fn initValues() void {
     g_divisor_128 = @as(U256, lo);
     g_divisor_64 = @as(U256, xorshift64() | 1);
     for (&g_small_exp) |*v| v.* = @as(U256, (xorshift64() & 0xFF) | 1);
+    for (&g_bytecode) |*b| b.* = @truncate(xorshift64());
     g_initialized = true;
 }
 
@@ -259,6 +263,42 @@ pub fn KeccakRunner(comptime data_size: usize) type {
     };
 }
 
+pub fn DupRunner(comptime n: u8) type {
+    return struct {
+        pub fn run(_: std.mem.Allocator) void {
+            const opcodes = interpreter.opcodes;
+            for (0..OPS_PER_BATCH) |_| {
+                _ = opcodes.opDupN(&g_stack, &g_gas, n);
+            }
+            std.mem.doNotOptimizeAway(&g_stack);
+        }
+    };
+}
+
+pub fn SwapRunner(comptime n: u8) type {
+    return struct {
+        pub fn run(_: std.mem.Allocator) void {
+            const opcodes = interpreter.opcodes;
+            for (0..OPS_PER_BATCH) |_| {
+                _ = opcodes.opSwapN(&g_stack, &g_gas, n);
+            }
+            std.mem.doNotOptimizeAway(&g_stack);
+        }
+    };
+}
+
+pub fn PushRunner(comptime n: u8) type {
+    return struct {
+        pub fn run(_: std.mem.Allocator) void {
+            const opcodes = interpreter.opcodes;
+            for (0..OPS_PER_BATCH) |_| {
+                _ = opcodes.opPushN(&g_stack, &g_gas, &g_bytecode, &g_pc, n);
+            }
+            std.mem.doNotOptimizeAway(&g_stack);
+        }
+    };
+}
+
 // ---------------------------------------------------------------------------
 // Helper: get gas cost from instruction table
 // ---------------------------------------------------------------------------
@@ -288,7 +328,7 @@ pub fn preExpandMemory(mem_size: usize) void {
 // ---------------------------------------------------------------------------
 
 fn gasCostForName(name: []const u8) f64 {
-    const modules = .{ arithmetic_bench, bitwise_bench, comparison_bench, memory_bench, keccak_bench };
+    const modules = .{ arithmetic_bench, bitwise_bench, comparison_bench, memory_bench, keccak_bench, stack_bench };
     inline for (modules) |mod| {
         if (mod.gasCost(name)) |g| return g;
     }
@@ -300,7 +340,7 @@ fn gasCostForName(name: []const u8) f64 {
 // ---------------------------------------------------------------------------
 
 fn getOpcodeCategory(name: []const u8) []const u8 {
-    const modules = .{ arithmetic_bench, bitwise_bench, comparison_bench, memory_bench, keccak_bench };
+    const modules = .{ arithmetic_bench, bitwise_bench, comparison_bench, memory_bench, keccak_bench, stack_bench };
     inline for (modules) |mod| {
         if (mod.category(name)) |c| return c;
     }
@@ -400,6 +440,7 @@ pub fn main() !void {
     try comparison_bench.register(&bench, filter);
     try memory_bench.register(&bench, filter);
     try keccak_bench.register(&bench, filter);
+    try stack_bench.register(&bench, filter);
 
     // Print results
     try writer.print("{s:<20}{s:<10}{s:<15}{s:<24}{s:<30}{s:<12}{s:<12}{s}\n", .{

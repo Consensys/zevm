@@ -54,12 +54,13 @@ pub inline fn opMload(stack: *Stack, gas: *Gas, memory: *Memory) InstructionResu
         memory.buffer.resize(std.heap.c_allocator, new_size) catch return .memory_limit_oog;
     }
 
-    // Read 32 bytes from memory as U256 (big-endian)
-    var value: primitives.U256 = 0;
+    // Read 32 bytes from memory as U256 (big-endian, 4 bulk u64 reads)
+    const U = primitives.U256;
     const slice = memory.buffer.items[offset_usize..][0..32];
-    for (slice) |byte| {
-        value = (value << 8) | byte;
-    }
+    const value: U = (@as(U, std.mem.readInt(u64, slice[0..8], .big)) << 192) |
+        (@as(U, std.mem.readInt(u64, slice[8..16], .big)) << 128) |
+        (@as(U, std.mem.readInt(u64, slice[16..24], .big)) << 64) |
+        @as(U, std.mem.readInt(u64, slice[24..32], .big));
 
     stack.setTopUnsafe().* = value;
     return .continue_;
@@ -94,16 +95,12 @@ pub inline fn opMstore(stack: *Stack, gas: *Gas, memory: *Memory) InstructionRes
         memory.buffer.resize(std.heap.c_allocator, new_size) catch return .memory_limit_oog;
     }
 
-    // Write 32 bytes to memory (big-endian)
-    var bytes: [32]u8 = undefined;
-    var v = value;
-    var i: usize = 32;
-    while (i > 0) {
-        i -= 1;
-        bytes[i] = @intCast(v & 0xFF);
-        v >>= 8;
-    }
-    @memcpy(memory.buffer.items[offset_usize..][0..32], &bytes);
+    // Write 32 bytes to memory (big-endian, 4 bulk u64 writes)
+    const dest = memory.buffer.items[offset_usize..][0..32];
+    std.mem.writeInt(u64, dest[0..8], @intCast(value >> 192), .big);
+    std.mem.writeInt(u64, dest[8..16], @intCast(value >> 128), .big);
+    std.mem.writeInt(u64, dest[16..24], @intCast(value >> 64), .big);
+    std.mem.writeInt(u64, dest[24..32], @intCast(value), .big);
 
     return .continue_;
 }
