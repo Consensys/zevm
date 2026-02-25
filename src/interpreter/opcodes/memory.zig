@@ -4,12 +4,8 @@ const Stack = @import("../stack.zig").Stack;
 const Gas = @import("../gas.zig").Gas;
 const Memory = @import("../memory.zig").Memory;
 const InstructionResult = @import("../instruction_result.zig").InstructionResult;
+const gas_costs = @import("../gas_costs.zig");
 
-pub const GAS_VERYLOW: u64 = 3;
-pub const GAS_BASE: u64 = 2;
-pub const GAS_MEMORY: u64 = 3;
-
-/// Calculate memory expansion cost
 fn memoryExpansionCost(current_words: usize, new_words: usize) u64 {
     if (new_words <= current_words) return 0;
     const new_cost = memoryCost(new_words);
@@ -18,7 +14,7 @@ fn memoryExpansionCost(current_words: usize, new_words: usize) u64 {
 }
 
 fn memoryCost(num_words: usize) u64 {
-    const linear = num_words * GAS_MEMORY;
+    const linear = num_words * gas_costs.G_MEMORY;
     const quadratic = (num_words * num_words) / 512;
     return @intCast(linear + quadratic);
 }
@@ -31,7 +27,7 @@ fn toWordSize(size: usize) usize {
 /// Stack: [offset] -> [value]   Gas: 3 + memory_expansion
 pub inline fn opMload(stack: *Stack, gas: *Gas, memory: *Memory) InstructionResult {
     if (!stack.hasItems(1)) return .stack_underflow;
-    if (!gas.spend(GAS_VERYLOW)) return .out_of_gas;
+    if (!gas.spend(gas_costs.G_VERYLOW)) return .out_of_gas;
 
     const offset = stack.peekUnsafe(0);
 
@@ -70,7 +66,7 @@ pub inline fn opMload(stack: *Stack, gas: *Gas, memory: *Memory) InstructionResu
 /// Stack: [offset, value] -> []   Gas: 3 + memory_expansion
 pub inline fn opMstore(stack: *Stack, gas: *Gas, memory: *Memory) InstructionResult {
     if (!stack.hasItems(2)) return .stack_underflow;
-    if (!gas.spend(GAS_VERYLOW)) return .out_of_gas;
+    if (!gas.spend(gas_costs.G_VERYLOW)) return .out_of_gas;
 
     const offset = stack.peekUnsafe(0);
     const value = stack.peekUnsafe(1);
@@ -109,7 +105,7 @@ pub inline fn opMstore(stack: *Stack, gas: *Gas, memory: *Memory) InstructionRes
 /// Stack: [offset, value] -> []   Gas: 3 + memory_expansion
 pub inline fn opMstore8(stack: *Stack, gas: *Gas, memory: *Memory) InstructionResult {
     if (!stack.hasItems(2)) return .stack_underflow;
-    if (!gas.spend(GAS_VERYLOW)) return .out_of_gas;
+    if (!gas.spend(gas_costs.G_VERYLOW)) return .out_of_gas;
 
     const offset = stack.peekUnsafe(0);
     const value = stack.peekUnsafe(1);
@@ -144,7 +140,7 @@ pub inline fn opMstore8(stack: *Stack, gas: *Gas, memory: *Memory) InstructionRe
 /// Stack: [] -> [size]   Gas: 2
 pub inline fn opMsize(stack: *Stack, gas: *Gas, memory: *Memory) InstructionResult {
     if (!stack.hasSpace(1)) return .stack_overflow;
-    if (!gas.spend(GAS_BASE)) return .out_of_gas;
+    if (!gas.spend(gas_costs.G_BASE)) return .out_of_gas;
     stack.pushUnsafe(memory.size());
     return .continue_;
 }
@@ -153,7 +149,7 @@ pub inline fn opMsize(stack: *Stack, gas: *Gas, memory: *Memory) InstructionResu
 /// Stack: [dest, src, length] -> []   Gas: 3 + copy_cost + memory_expansion
 pub inline fn opMcopy(stack: *Stack, gas: *Gas, memory: *Memory) InstructionResult {
     if (!stack.hasItems(3)) return .stack_underflow;
-    if (!gas.spend(GAS_VERYLOW)) return .out_of_gas;
+    if (!gas.spend(gas_costs.G_VERYLOW)) return .out_of_gas;
 
     const dest = stack.peekUnsafe(0);
     const src = stack.peekUnsafe(1);
@@ -171,7 +167,7 @@ pub inline fn opMcopy(stack: *Stack, gas: *Gas, memory: *Memory) InstructionResu
 
     // Calculate copy cost: 3 gas per word
     const num_words = toWordSize(length_usize);
-    const copy_cost = 3 * num_words;
+    const copy_cost = gas_costs.G_COPY * num_words;
     if (!gas.spend(@intCast(copy_cost))) return .out_of_gas;
 
     // Calculate memory expansion cost
