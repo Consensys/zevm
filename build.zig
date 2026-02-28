@@ -299,13 +299,13 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(test_exe);
 
-    // Benchmark executable
+    // Benchmark executable (always ReleaseFast for accurate timing)
     const bench_exe = b.addExecutable(.{
         .name = "zevm-bench",
         .root_module = b.addModule("zevm-bench", .{
-            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "examples/benchmark.zig" } },
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "benchmarks/main.zig" } },
             .target = target,
-            .optimize = optimize,
+            .optimize = .ReleaseFast,
         }),
     });
 
@@ -320,6 +320,10 @@ pub fn build(b: *std.Build) void {
     bench_exe.root_module.addImport("precompile", precompile_module);
     bench_exe.root_module.addImport("handler", handler_module);
     bench_exe.root_module.addImport("inspector", inspector_module);
+
+    // Add zbench dependency for benchmarking
+    const zbench_dep = b.dependency("zbench", .{ .target = target, .optimize = .ReleaseFast });
+    bench_exe.root_module.addImport("zbench", zbench_dep.module("zbench"));
 
     b.installArtifact(bench_exe);
 
@@ -341,6 +345,20 @@ pub fn build(b: *std.Build) void {
     interpreter_tests.root_module.addImport("context", context_module);
     const run_interpreter_tests = b.addRunArtifact(interpreter_tests);
     test_step.dependOn(&run_interpreter_tests.step);
+
+    // Execute tests (Interpreter.execute + Host vtable)
+    const execute_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/interpreter/execute_tests.zig" } },
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    execute_tests.root_module.addImport("primitives", primitives_module);
+    execute_tests.root_module.addImport("bytecode", bytecode_module);
+    execute_tests.root_module.addImport("context", context_module);
+    const run_execute_tests = b.addRunArtifact(execute_tests);
+    test_step.dependOn(&run_execute_tests.step);
 
     // Precompile unit tests - these are run via zig test command in CI
     // The command needs to link libc and include all modules
@@ -544,4 +562,61 @@ pub fn build(b: *std.Build) void {
     cheatcode_inspector_exe.root_module.addImport("handler", handler_module);
     cheatcode_inspector_exe.root_module.addImport("inspector", inspector_module);
     b.installArtifact(cheatcode_inspector_exe);
+
+    // --- Spec test generator (standalone, no ZEVM deps) ---
+    const spec_test_types_module = b.addModule("types", .{
+        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/spec_test/types.zig" } },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const generator_exe = b.addExecutable(.{
+        .name = "spec-test-generator",
+        .root_module = b.createModule(.{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/spec_test/generator.zig" } },
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    b.installArtifact(generator_exe);
+
+    const gen_step = b.step("spec-test-generator", "Build the spec test generator");
+    gen_step.dependOn(&b.addInstallArtifact(generator_exe, .{}).step);
+
+    // --- Spec test runner (links ZEVM modules, imports generated data) ---
+    const spec_test_data_module = b.addModule("spec_test_data", .{
+        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "spec-tests/generated/data.zig" } },
+        .target = target,
+        .optimize = optimize,
+    });
+    spec_test_data_module.addImport("types", spec_test_types_module);
+
+    const runner_exe = b.addExecutable(.{
+        .name = "spec-test-runner",
+        .root_module = b.createModule(.{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/spec_test/main.zig" } },
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    runner_exe.root_module.addImport("spec_test_data", spec_test_data_module);
+    runner_exe.root_module.addImport("types", spec_test_types_module);
+    runner_exe.root_module.addImport("runner", b.addModule("runner", .{
+        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/spec_test/runner.zig" } },
+        .target = target,
+        .optimize = optimize,
+    }));
+
+    // The runner module needs access to ZEVM modules
+    const runner_mod = runner_exe.root_module.import_table.get("runner").?;
+    runner_mod.addImport("types", spec_test_types_module);
+    runner_mod.addImport("primitives", primitives_module);
+    runner_mod.addImport("bytecode", bytecode_module);
+    runner_mod.addImport("interpreter", interpreter_module);
+    runner_mod.addImport("context", context_module);
+
+    b.installArtifact(runner_exe);
+
+    const runner_step = b.step("spec-test-runner", "Build the spec test runner");
+    runner_step.dependOn(&b.addInstallArtifact(runner_exe, .{}).step);
 }
