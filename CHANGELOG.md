@@ -25,6 +25,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - Nothing yet
 
+## [0.4.0] - 2026-03-06
+
+### Added
+- **Full Ethereum Execution Spec Compliance**: 45,151/45,151 execution spec tests passing across all hardforks (Frontier through Osaka)
+- **Complete EVM Interpreter**: All opcodes implemented including CALL, CALLCODE, DELEGATECALL, STATICCALL, CREATE, CREATE2, SELFDESTRUCT, LOG0-4, and all environment/host opcodes
+- **Host Interface**: Full `Host` struct wrapping `Context`, providing synchronous recursive sub-call dispatch
+- **Spec Test Runner**: `spec-test-runner` executable for running Ethereum execution-spec-tests fixtures at runtime
+- **EIP-7702 (Set Code)**: Full delegation support including authority validation, nonce/code checks, and delegation gas accounting
+- **EIP-4844 (Blob Transactions)**: Complete blob transaction validation, blob fee market, and KZG point evaluation
+- **EIP-3860 (Initcode Size Limit)**: Initcode size cap and word gas cost for CREATE/CREATE2 on Shanghai+
+- **EIP-6780 (SELFDESTRUCT Semantics)**: Same-transaction-only destruction, with correct revert/refund deduplication
+- **EIP-2200 (SSTORE Gas Metering)**: Full net-metered SSTORE with stipend guard
+- **BLS12-381 Canonical Field Element Validation**: All BLS precompiles now reject non-canonical field elements per EIP-2537
+- **Inline module tests**: `zig build test` now discovers and runs tests embedded in interpreter and handler modules
+
+### Changed
+- **Gas Accounting**: Corrected CALL/SLOAD/BALANCE/EXTCODE gas costs across all hardforks (Frontier, Tangerine, Berlin+); 63/64 forwarding rule; stipend handling
+- **Build System**: `handler_tests` and `interpreter_tests` added as first-class `zig build test` targets with full crypto library linking
+
+### Fixed
+- **CALL gas**: Pre-Tangerine base cost 40, Tangerine–preBerlin 700, Berlin+ warm/cold only (no double-charge)
+- **CREATE deposit OOG**: Pre-Homestead deploys empty contract on deposit OOG (EIP-2 semantics); Homestead+ fully reverts
+- **SELFDESTRUCT G_NEWACCOUNT**: Only charged on Tangerine+ (not Frontier/Homestead)
+- **SELFDESTRUCT revert**: Target account balance correctly restored when a same-tx SELFDESTRUCT is reverted
+- **EVM return data**: Sub-call errors clear return data; only SUCCESS and REVERT propagate output to caller
+- **BLS12-381**: Fixed silent field element reduction — inputs ≥ field modulus now correctly return errors
+- **Duplicate rpath on macOS**: Re-applied `install_name_tool` workaround for duplicate OpenSSL LC_RPATH entries (Zig issue #24349)
+
 ## [0.3.1] - 2025-12-02
 
 ### Added
