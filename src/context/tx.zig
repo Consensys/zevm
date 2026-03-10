@@ -1,5 +1,6 @@
 const std = @import("std");
 const primitives = @import("primitives");
+const alloc_mod = @import("zevm_allocator");
 
 /// Transaction type enum
 pub const TransactionType = enum(u8) {
@@ -37,7 +38,7 @@ pub const AccessListItem = struct {
     }
 
     pub fn deinit(self: *AccessListItem) void {
-        self.storage_keys.deinit(std.heap.c_allocator);
+        self.storage_keys.deinit(alloc_mod.get());
     }
 };
 
@@ -57,7 +58,7 @@ pub const AccessList = struct {
             for (items.items) |*item| {
                 item.deinit();
             }
-            items.deinit(std.heap.c_allocator);
+            items.deinit(alloc_mod.get());
         }
     }
 
@@ -156,10 +157,6 @@ pub const TxEnv = struct {
     authorization_list: ?std.ArrayList(Either),
 
     pub fn default() TxEnv {
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        defer _ = gpa.deinit();
-        const allocator = gpa.allocator();
-
         return .{
             .tx_type = 0,
             .caller = [_]u8{0} ** 20,
@@ -170,7 +167,7 @@ pub const TxEnv = struct {
             .data = null,
             .nonce = 0,
             .chain_id = 1, // Mainnet chain ID is 1
-            .access_list = AccessList.init(allocator),
+            .access_list = AccessList.init(alloc_mod.get()),
             .gas_priority_fee = null,
             .blob_hashes = null,
             .max_fee_per_blob_gas = 0,
@@ -180,14 +177,14 @@ pub const TxEnv = struct {
 
     pub fn deinit(self: *TxEnv) void {
         if (self.data) |*data| {
-            data.deinit(std.heap.c_allocator);
+            data.deinit(alloc_mod.get());
         }
         self.access_list.deinit();
         if (self.blob_hashes) |*blob_hashes| {
-            blob_hashes.deinit(std.heap.c_allocator);
+            blob_hashes.deinit(alloc_mod.get());
         }
         if (self.authorization_list) |*authorization_list| {
-            authorization_list.deinit(std.heap.c_allocator);
+            authorization_list.deinit(alloc_mod.get());
         }
     }
 
@@ -358,10 +355,6 @@ pub const TxEnvBuilder = struct {
     authorization_list: ?std.ArrayList(Either),
 
     pub fn new() TxEnvBuilder {
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        defer _ = gpa.deinit();
-        const allocator = gpa.allocator();
-
         return .{
             .tx_type = null,
             .caller = [_]u8{0} ** 20,
@@ -372,7 +365,7 @@ pub const TxEnvBuilder = struct {
             .data = null,
             .nonce = 0,
             .chain_id = 1, // Mainnet chain ID is 1
-            .access_list = AccessList.init(allocator),
+            .access_list = AccessList.init(alloc_mod.get()),
             .gas_priority_fee = null,
             .blob_hashes = null,
             .max_fee_per_blob_gas = 0,
@@ -384,10 +377,10 @@ pub const TxEnvBuilder = struct {
         self.data.items.deinit();
         self.access_list.deinit();
         if (self.blob_hashes) |*blob_hashes| {
-            blob_hashes.deinit(std.heap.c_allocator);
+            blob_hashes.deinit(alloc_mod.get());
         }
         if (self.authorization_list) |*authorization_list| {
-            authorization_list.deinit(std.heap.c_allocator);
+            authorization_list.deinit(alloc_mod.get());
         }
     }
 

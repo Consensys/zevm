@@ -1,4 +1,5 @@
 const std = @import("std");
+const alloc_mod = @import("zevm_allocator");
 
 /// Local context that is filled by execution.
 pub const LocalContext = struct {
@@ -17,7 +18,7 @@ pub const LocalContext = struct {
     pub fn deinit(self: *LocalContext) void {
         self.shared_memory_buffer.deinit();
         if (self.precompile_error_message) |msg| {
-            std.heap.page_allocator.free(msg);
+            alloc_mod.get().free(msg);
         }
     }
 
@@ -32,7 +33,7 @@ pub const LocalContext = struct {
             buffer.clearRetainingCapacity();
         }
         if (self.precompile_error_message) |msg| {
-            std.heap.page_allocator.free(msg);
+            alloc_mod.get().free(msg);
         }
         self.precompile_error_message = null;
     }
@@ -43,9 +44,9 @@ pub const LocalContext = struct {
 
     pub fn setPrecompileErrorContext(self: *LocalContext, output: []const u8) !void {
         if (self.precompile_error_message) |msg| {
-            std.heap.page_allocator.free(msg);
+            alloc_mod.get().free(msg);
         }
-        self.precompile_error_message = try std.heap.page_allocator.dupe(u8, output);
+        self.precompile_error_message = try alloc_mod.get().dupe(u8, output);
     }
 
     pub fn takePrecompileErrorContext(self: *LocalContext) ?[]const u8 {

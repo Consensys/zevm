@@ -6,6 +6,7 @@
 //! 2. Uncomment the blst linking in build.zig
 //! 3. Ensure blst.h is in your include path
 const std = @import("std");
+const alloc_mod = @import("zevm_allocator");
 
 // Import blst C API
 // This will fail at compile time if blst.h is not found
@@ -193,15 +194,15 @@ pub fn g1Msm(pairs: []const struct { point: [96]u8, scalar: [32]u8 }) ![96]u8 {
     const zero96 = [_]u8{0} ** 96;
 
     // Parse points and scalars, filtering out infinity points (they contribute identity)
-    var points = try std.heap.c_allocator.alloc(c.blst_p1_affine, pairs.len);
-    defer std.heap.c_allocator.free(points);
-    var point_ptrs = try std.heap.c_allocator.alloc(*const c.blst_p1_affine, pairs.len);
-    defer std.heap.c_allocator.free(point_ptrs);
-    var scalar_ptrs = try std.heap.c_allocator.alloc(*const u8, pairs.len);
-    defer std.heap.c_allocator.free(scalar_ptrs);
+    var points = try alloc_mod.get().alloc(c.blst_p1_affine, pairs.len);
+    defer alloc_mod.get().free(points);
+    var point_ptrs = try alloc_mod.get().alloc(*const c.blst_p1_affine, pairs.len);
+    defer alloc_mod.get().free(point_ptrs);
+    var scalar_ptrs = try alloc_mod.get().alloc(*const u8, pairs.len);
+    defer alloc_mod.get().free(scalar_ptrs);
     // blst_scalar stores scalars in little-endian; blst_scalar_from_bendian converts from EIP-2537 big-endian
-    var scalars = try std.heap.c_allocator.alloc(c.blst_scalar, pairs.len);
-    defer std.heap.c_allocator.free(scalars);
+    var scalars = try alloc_mod.get().alloc(c.blst_scalar, pairs.len);
+    defer alloc_mod.get().free(scalars);
 
     var active_count: usize = 0;
     for (pairs) |pair| {
@@ -240,8 +241,8 @@ pub fn g1Msm(pairs: []const struct { point: [96]u8, scalar: [32]u8 }) ![96]u8 {
     // Allocate scratch space for MSM
     const scratch_size = c.blst_p1s_mult_pippenger_scratch_sizeof(active_count);
     const alloc_size = if (scratch_size == 0) @as(usize, 8) else scratch_size;
-    const scratch_bytes = try std.heap.page_allocator.alloc(u8, alloc_size);
-    defer std.heap.page_allocator.free(scratch_bytes);
+    const scratch_bytes = try alloc_mod.get().alloc(u8, alloc_size);
+    defer alloc_mod.get().free(scratch_bytes);
 
     var result: c.blst_p1 = undefined;
     c.blst_p1s_mult_pippenger(&result, point_ptrs.ptr, @intCast(active_count), scalar_ptrs.ptr, 256, @ptrCast(@alignCast(scratch_bytes.ptr)));
@@ -353,15 +354,15 @@ pub fn g2Msm(pairs: []const struct { point: [192]u8, scalar: [32]u8 }) ![192]u8 
 
     const zero192 = [_]u8{0} ** 192;
 
-    var points = try std.heap.c_allocator.alloc(c.blst_p2_affine, pairs.len);
-    defer std.heap.c_allocator.free(points);
-    var point_ptrs = try std.heap.c_allocator.alloc(*const c.blst_p2_affine, pairs.len);
-    defer std.heap.c_allocator.free(point_ptrs);
-    var scalar_ptrs = try std.heap.c_allocator.alloc(*const u8, pairs.len);
-    defer std.heap.c_allocator.free(scalar_ptrs);
+    var points = try alloc_mod.get().alloc(c.blst_p2_affine, pairs.len);
+    defer alloc_mod.get().free(points);
+    var point_ptrs = try alloc_mod.get().alloc(*const c.blst_p2_affine, pairs.len);
+    defer alloc_mod.get().free(point_ptrs);
+    var scalar_ptrs = try alloc_mod.get().alloc(*const u8, pairs.len);
+    defer alloc_mod.get().free(scalar_ptrs);
     // blst_scalar stores scalars in little-endian; blst_scalar_from_bendian converts from EIP-2537 big-endian
-    var scalars = try std.heap.c_allocator.alloc(c.blst_scalar, pairs.len);
-    defer std.heap.c_allocator.free(scalars);
+    var scalars = try alloc_mod.get().alloc(c.blst_scalar, pairs.len);
+    defer alloc_mod.get().free(scalars);
 
     var active_count: usize = 0;
     for (pairs) |pair| {
@@ -399,8 +400,8 @@ pub fn g2Msm(pairs: []const struct { point: [192]u8, scalar: [32]u8 }) ![192]u8 
 
     const scratch_size = c.blst_p2s_mult_pippenger_scratch_sizeof(active_count);
     const alloc_size = if (scratch_size == 0) @as(usize, 8) else scratch_size;
-    const scratch_bytes = try std.heap.page_allocator.alloc(u8, alloc_size);
-    defer std.heap.page_allocator.free(scratch_bytes);
+    const scratch_bytes = try alloc_mod.get().alloc(u8, alloc_size);
+    defer alloc_mod.get().free(scratch_bytes);
 
     var result: c.blst_p2 = undefined;
     c.blst_p2s_mult_pippenger(&result, point_ptrs.ptr, @intCast(active_count), scalar_ptrs.ptr, 256, @ptrCast(@alignCast(scratch_bytes.ptr)));
@@ -435,10 +436,10 @@ pub fn pairingCheck(pairs: []const struct { g1: [96]u8, g2: [192]u8 }) !bool {
     const zero192 = [_]u8{0} ** 192;
 
     // Parse valid (non-infinity) pairs
-    var g1_points = try std.heap.c_allocator.alloc(c.blst_p1_affine, pairs.len);
-    defer std.heap.c_allocator.free(g1_points);
-    var g2_points = try std.heap.c_allocator.alloc(c.blst_p2_affine, pairs.len);
-    defer std.heap.c_allocator.free(g2_points);
+    var g1_points = try alloc_mod.get().alloc(c.blst_p1_affine, pairs.len);
+    defer alloc_mod.get().free(g1_points);
+    var g2_points = try alloc_mod.get().alloc(c.blst_p2_affine, pairs.len);
+    defer alloc_mod.get().free(g2_points);
 
     var active_count: usize = 0;
 

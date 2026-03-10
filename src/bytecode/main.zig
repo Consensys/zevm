@@ -1,5 +1,6 @@
 const std = @import("std");
 const primitives = @import("primitives");
+const alloc_mod = @import("zevm_allocator");
 
 /// EVM opcode definitions and utilities. It contains opcode information and utilities to work with opcodes.
 /// An EVM opcode
@@ -644,7 +645,7 @@ pub const LegacyAnalyzedBytecode = struct {
         //   - default() / empty input: original_len == 0, data is a static &[_]u8{0}
         //   - alloc-failure fallback: jump_table.data.len == 0, data is static &[_]u8{}
         if (self.original_len > 0 and self.jump_table.data.len > 0) {
-            std.heap.c_allocator.free(self.jump_table.data);
+            alloc_mod.get().free(self.jump_table.data);
         }
     }
 };
@@ -745,7 +746,7 @@ fn analyzeLegacy(bytecode: []const u8) LegacyAnalyzedBytecode {
 
     // Allocate bit vector on heap (one bit per bytecode position) to avoid dangling pointer
     const bit_vec_len = (bytecode.len + 7) / 8;
-    const bit_vec = std.heap.c_allocator.alloc(u8, bit_vec_len) catch {
+    const bit_vec = alloc_mod.get().alloc(u8, bit_vec_len) catch {
         // Allocation failed: return bytecode with empty jump table
         return LegacyAnalyzedBytecode{
             .bytecode = bytecode,

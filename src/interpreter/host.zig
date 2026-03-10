@@ -2,6 +2,7 @@ const std = @import("std");
 const primitives = @import("primitives");
 const bytecode_mod = @import("bytecode");
 const context_mod = @import("context");
+const alloc_mod = @import("zevm_allocator");
 const Interpreter = @import("interpreter.zig").Interpreter;
 const InputsImpl = @import("interpreter.zig").InputsImpl;
 const ExtBytecode = @import("interpreter.zig").ExtBytecode;
@@ -521,7 +522,7 @@ pub const Host = struct {
         const gas_after_deposit = gas_remaining - deposit_cost;
 
         if (deployed_raw.len > 0) {
-            const deployed_copy = std.heap.c_allocator.dupe(u8, deployed_raw) catch {
+            const deployed_copy = alloc_mod.get().dupe(u8, deployed_raw) catch {
                 js.checkpointRevert(checkpoint);
                 return CreateResult.failure();
             };
@@ -564,8 +565,8 @@ pub const Host = struct {
                 else
                     &[_]u8{};
                 var rd_buf: std.ArrayList(u8) = .{};
-                defer rd_buf.deinit(std.heap.c_allocator);
-                rd_buf.appendSlice(std.heap.c_allocator, rd) catch {};
+                defer rd_buf.deinit(alloc_mod.get());
+                rd_buf.appendSlice(alloc_mod.get(), rd) catch {};
                 return self.finalizeCall(s.checkpoint, sub_interp.result, inputs.gas_limit, sub_interp.gas.remaining, sub_interp.gas.refunded, rd_buf.items);
             },
         }
@@ -604,8 +605,8 @@ pub const Host = struct {
                 else
                     &[_]u8{};
                 var rd_buf: std.ArrayList(u8) = .{};
-                defer rd_buf.deinit(std.heap.c_allocator);
-                rd_buf.appendSlice(std.heap.c_allocator, rd) catch {};
+                defer rd_buf.deinit(alloc_mod.get());
+                rd_buf.appendSlice(alloc_mod.get(), rd) catch {};
                 return self.finalizeCreate(s.checkpoint, s.new_addr, sub_interp.result, sub_interp.gas.remaining, sub_interp.gas.refunded, rd_buf.items, spec_id);
             },
         }

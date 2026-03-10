@@ -2,6 +2,7 @@ const std = @import("std");
 const primitives = @import("primitives");
 const InstructionContext = @import("../instruction_context.zig").InstructionContext;
 const gas_costs = @import("../gas_costs.zig");
+const alloc_mod = @import("zevm_allocator");
 
 fn memoryCostWords(num_words: usize) u64 {
     const n: u64 = @intCast(num_words);
@@ -61,7 +62,7 @@ pub fn opKeccak256(ctx: *InstructionContext) void {
         const aligned_end = ((end + 31) / 32) * 32;
         if (aligned_end > ctx.interpreter.memory.size()) {
             const old_size = ctx.interpreter.memory.size();
-            ctx.interpreter.memory.buffer.resize(std.heap.c_allocator, aligned_end) catch {
+            ctx.interpreter.memory.buffer.resize(alloc_mod.get(), aligned_end) catch {
                 ctx.interpreter.halt(.memory_limit_oog);
                 return;
             };

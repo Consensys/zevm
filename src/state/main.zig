@@ -1,6 +1,7 @@
 const std = @import("std");
 const primitives = @import("primitives");
 const bytecode = @import("bytecode");
+const alloc_mod = @import("zevm_allocator");
 
 /// Account and storage state management for the EVM.
 /// Account information that contains balance, nonce, code hash and code
@@ -403,7 +404,7 @@ pub const Account = struct {
         return Self{
             .info = AccountInfo.default(),
             .transaction_id = 0,
-            .storage = std.AutoHashMap(primitives.StorageKey, EvmStorageSlot).init(std.heap.page_allocator),
+            .storage = std.AutoHashMap(primitives.StorageKey, EvmStorageSlot).init(alloc_mod.get()),
             .status = AccountStatus.empty(),
         };
     }
@@ -412,7 +413,7 @@ pub const Account = struct {
     pub fn newNotExisting(transaction_id: usize) Self {
         return Self{
             .info = AccountInfo.default(),
-            .storage = std.AutoHashMap(primitives.StorageKey, EvmStorageSlot).init(std.heap.page_allocator),
+            .storage = std.AutoHashMap(primitives.StorageKey, EvmStorageSlot).init(alloc_mod.get()),
             .transaction_id = transaction_id,
             .status = AccountStatus{ .loaded_as_not_existing = true },
         };

@@ -2,6 +2,7 @@ const std = @import("std");
 const primitives = @import("primitives");
 const bytecode = @import("bytecode");
 const context = @import("context");
+const alloc_mod = @import("zevm_allocator");
 const Gas = @import("gas.zig").Gas;
 const Stack = @import("stack.zig").Stack;
 const Memory = @import("memory.zig").Memory;
@@ -246,7 +247,7 @@ pub const ExtBytecode = struct {
             self.bytecode.deinit();
         }
         if (self.eof_sections) |*sections| {
-            sections.deinit(std.heap.c_allocator);
+            sections.deinit(alloc_mod.get());
         }
     }
 

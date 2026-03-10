@@ -1,20 +1,6 @@
 const std = @import("std");
-const primitives = @import("primitives");
-const main = @import("main.zig");
-
-/// P256Verify precompile (secp256r1 signature verification)
-pub const P256VERIFY = main.Precompile.new(
-    main.PrecompileId.P256Verify,
-    main.u64ToAddress(256),
-    p256Verify,
-);
-
-/// P256Verify precompile with Osaka gas cost
-pub const P256VERIFY_OSAKA = main.Precompile.new(
-    main.PrecompileId.P256Verify,
-    main.u64ToAddress(256),
-    p256VerifyOsaka,
-);
+const T = @import("precompile_types");
+const alloc_mod = @import("zevm_allocator");
 
 /// Base gas fee for secp256r1 p256verify operation
 pub const P256VERIFY_BASE_GAS_FEE: u64 = 3450;
@@ -30,32 +16,40 @@ const INPUT_LENGTH: usize = 160;
 /// | signed message hash |  r  |  s  | public key x | public key y |
 /// | :-----------------: | :-: | :-: | :----------: | :----------: |
 /// |          32         | 32  | 32  |     32       |      32      |
-pub fn p256Verify(input: []const u8, gas_limit: u64) main.PrecompileResult {
+pub fn p256Verify(input: []const u8, gas_limit: u64) T.PrecompileResult {
     return p256VerifyInner(input, gas_limit, P256VERIFY_BASE_GAS_FEE);
 }
 
 /// secp256r1 precompile logic with Osaka gas cost
-pub fn p256VerifyOsaka(input: []const u8, gas_limit: u64) main.PrecompileResult {
+pub fn p256VerifyOsaka(input: []const u8, gas_limit: u64) T.PrecompileResult {
     return p256VerifyInner(input, gas_limit, P256VERIFY_BASE_GAS_FEE_OSAKA);
 }
 
-fn p256VerifyInner(input: []const u8, gas_limit: u64, gas_cost: u64) main.PrecompileResult {
+fn p256VerifyInner(input: []const u8, gas_limit: u64, gas_cost: u64) T.PrecompileResult {
     if (gas_cost > gas_limit) {
-        return main.PrecompileResult{ .err = main.PrecompileError.OutOfGas };
+        return T.PrecompileResult{ .err = T.PrecompileError.OutOfGas };
     }
 
     if (verifyImpl(input)) {
         var result: [32]u8 = [_]u8{0} ** 32;
         result[31] = 1;
-        const heap_out = std.heap.c_allocator.dupe(u8, &result) catch
-            return main.PrecompileResult{ .err = main.PrecompileError.OutOfGas };
-        return main.PrecompileResult{ .success = main.PrecompileOutput.new(gas_cost, heap_out) };
+        const heap_out = alloc_mod.get().dupe(u8, &result) catch
+            return T.PrecompileResult{ .err = T.PrecompileError.OutOfGas };
+        return T.PrecompileResult{ .success = T.PrecompileOutput.new(gas_cost, heap_out) };
     } else {
-        return main.PrecompileResult{ .success = main.PrecompileOutput.new(gas_cost, &[_]u8{}) };
+        return T.PrecompileResult{ .success = T.PrecompileOutput.new(gas_cost, &[_]u8{}) };
     }
 }
 
-const openssl_wrapper = @import("openssl_wrapper.zig");
+const build_options = @import("build_options");
+// Only analyze the C-wrapper when OpenSSL is enabled; on freestanding targets
+// (e.g. Zisk zkVM) this avoids the @cImport that requires libc headers.
+const openssl_wrapper = if (build_options.enable_openssl)
+    @import("openssl_wrapper.zig")
+else
+    struct {
+        pub fn verifyP256(_: [32]u8, _: [64]u8, _: [64]u8) bool { return false; }
+    };
 
 /// Verify secp256r1 signature
 /// Returns true if the signature is valid, false otherwise

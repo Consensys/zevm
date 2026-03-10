@@ -1,6 +1,7 @@
 const std = @import("std");
 const primitives = @import("primitives");
 const Context = @import("context.zig").Context;
+const alloc_mod = @import("zevm_allocator");
 
 /// Main EVM structure that contains all data needed for execution.
 pub const Evm = struct {
@@ -193,15 +194,15 @@ pub const Frame = struct {
         _ = code;
         return .{
             .pc = 0,
-            .stack = std.ArrayList(primitives.U256).init(std.heap.page_allocator),
-            .memory = std.ArrayList(u8).init(std.heap.page_allocator),
+            .stack = std.ArrayList(primitives.U256).init(alloc_mod.get()),
+            .memory = std.ArrayList(u8).init(alloc_mod.get()),
             .gas = gas,
-            .return_data = std.ArrayList(u8).init(std.heap.page_allocator),
+            .return_data = std.ArrayList(u8).init(alloc_mod.get()),
             .caller = caller,
             .target = target,
             .value = value,
-            .input = std.ArrayList(u8).init(std.heap.page_allocator),
-            .code = std.ArrayList(u8).init(std.heap.page_allocator),
+            .input = std.ArrayList(u8).init(alloc_mod.get()),
+            .code = std.ArrayList(u8).init(alloc_mod.get()),
             .is_static = is_static,
             .depth = depth,
         };
