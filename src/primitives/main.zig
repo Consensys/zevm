@@ -72,6 +72,10 @@ pub const CALL_STACK_LIMIT: u64 = 1024;
 
 /// Blob base fee update fraction for Prague hardfork
 pub const BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE: u64 = 3338477;
+/// Blob base fee update fraction for Osaka hardfork (EIP-7691)
+pub const BLOB_BASE_FEE_UPDATE_FRACTION_OSAKA: u64 = 5007716;
+/// EIP-7918: blob base cost (2**13) used for reserve price calculation
+pub const BLOB_BASE_COST: u64 = 8192;
 
 /// EIP-4844: gas consumed per blob
 pub const GAS_PER_BLOB: u64 = 131_072;

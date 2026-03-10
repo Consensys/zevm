@@ -147,7 +147,7 @@ pub const Host = struct {
         return self.ctx.block.basefee;
     }
 
-    pub fn blobBasefee(self: *Host) u64 {
+    pub fn blobBasefee(self: *Host) u128 {
         if (self.ctx.block.blob_excess_gas_and_price) |b| return b.blob_gasprice;
         return 0;
     }
@@ -454,10 +454,16 @@ pub const Host = struct {
             }
         }
         {
-            var db_it = js.database.storage_map.iterator();
-            while (db_it.next()) |entry| {
-                if (std.mem.eql(u8, &entry.key_ptr.@"0", &new_addr) and entry.value_ptr.* != 0)
-                    return .{ .failed = CreateResult.preExecFailure(0) };
+            // Skip DB storage check if the account's storage was explicitly wiped
+            // (e.g. by SELFDESTRUCT in a previous tx). In that case, the DB still
+            // holds the old pre-selfdestruct slots which must not cause a collision.
+            const storage_wiped = if (js.inner.evm_state.get(new_addr)) |acct| acct.status.storage_wiped else false;
+            if (!storage_wiped) {
+                var db_it = js.database.storage_map.iterator();
+                while (db_it.next()) |entry| {
+                    if (std.mem.eql(u8, &entry.key_ptr.@"0", &new_addr) and entry.value_ptr.* != 0)
+                        return .{ .failed = CreateResult.preExecFailure(0) };
+                }
             }
         }
 

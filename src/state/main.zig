@@ -218,8 +218,9 @@ pub const AccountStatus = packed struct {
     /// used to mark account as cold.
     /// It is used only in local scope and it is reset on account loading.
     cold: bool = false,
-    /// Reserved for future use
-    _reserved: bool = false,
+    /// Storage was explicitly wiped (e.g. by SELFDESTRUCT in a previous tx, then account reloaded).
+    /// When true, the pre-state storage must not be inherited in post-state computation.
+    storage_wiped: bool = false,
 
     pub fn empty() AccountStatus {
         return AccountStatus{};
@@ -289,6 +290,11 @@ pub const AccountStatus = packed struct {
     /// Clears the self destructed local flag
     pub fn clearSelfDestructedLocal(self: *AccountStatus) void {
         self.self_destructed_local = false;
+    }
+
+    /// Sets the storage_wiped flag
+    pub fn setStorageWiped(self: *AccountStatus) void {
+        self.storage_wiped = true;
     }
 
     /// Sets the loaded as not existing flag
