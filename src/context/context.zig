@@ -560,6 +560,12 @@ pub const Context = struct {
     // Database methods
 
     pub fn blockHash(self: *Context, requested_number: u64) ?primitives.Hash {
+        // BLOCKHASH is only valid for the last BLOCK_HASH_HISTORY (256) blocks.
+        // Requests for the current block or future blocks, or blocks older than 256
+        // blocks ago, must return zero per the Yellow Paper.
+        const current: u64 = @intCast(self.block.number);
+        if (requested_number >= current) return [_]u8{0} ** 32;
+        if (current - requested_number > primitives.BLOCK_HASH_HISTORY) return [_]u8{0} ** 32;
         return self.journaled_state.database.blockHash(requested_number) catch {
             self.ctx_error = ContextError.database_error;
             return null;

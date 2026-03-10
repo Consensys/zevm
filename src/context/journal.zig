@@ -422,6 +422,20 @@ pub const JournalInner = struct {
     ///
     /// `commit_tx` is used even for discarding transactions so transaction_id will be incremented.
     pub fn commitTx(self: *JournalInner) void {
+        // Per EIP-2200/EIP-3529: after committing a transaction, the "original value"
+        // of each storage slot becomes the committed (present) value. Without this,
+        // subsequent transactions in the same block would incorrectly treat slots as
+        // "dirty" (original ≠ current) rather than "clean" (original == current),
+        // causing SSTORE to charge 100 gas (dirty-warm) instead of 2900 (clean-nonzero).
+        var state_it = self.evm_state.iterator();
+        while (state_it.next()) |entry| {
+            var slot_it = entry.value_ptr.storage.valueIterator();
+            while (slot_it.next()) |slot| {
+                if (slot.original_value != slot.present_value) {
+                    slot.original_value = slot.present_value;
+                }
+            }
+        }
         self.transient_storage.clearRetainingCapacity();
         self.journal.clearRetainingCapacity();
         self.warm_addresses.clearCoinbaseAndAccessList();
@@ -832,6 +846,11 @@ pub const JournalInner = struct {
                 if (existing.isSelfdestructedLocally()) {
                     existing.selfdestruct();
                     existing.unmarkSelfdestructedLocally();
+                    // Clear the global self_destructed flag: when a new tx accesses a
+                    // previously-selfdestructed account, it is reborn as an empty account.
+                    existing.unmarkSelfdestruct();
+                    // Mark that storage was wiped so post-state won't inherit pre-alloc storage.
+                    existing.status.setStorageWiped();
                 }
                 if (existing.isCreatedLocally()) {
                     existing.unmarkCreatedLocally();

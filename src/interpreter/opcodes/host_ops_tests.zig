@@ -512,6 +512,8 @@ test "BLOCKHASH: known block returns hash" {
     var db = database_mod.InMemoryDB.init(ALLOC);
     try db.insertBlockHash(BLOCK_NUM, HASH);
     var ctx = makeCtx(db);
+    // Current block must be > BLOCK_NUM for the hash to be in the valid range
+    ctx.block.number = BLOCK_NUM + 1;
 
     var interp = makeInterp();
     interp.stack.pushUnsafe(@as(U, BLOCK_NUM));
