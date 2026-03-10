@@ -1,5 +1,6 @@
 const std = @import("std");
 const primitives = @import("primitives");
+const alloc_mod = @import("zevm_allocator");
 
 /// EVM interpreter stack limit.
 pub const STACK_LIMIT: usize = 1024;
@@ -14,14 +15,14 @@ pub const Stack = struct {
 
     /// Create a new stack (allocates STACK_LIMIT * 32 bytes on the heap).
     pub fn new() Stack {
-        const backing = std.heap.c_allocator.alloc(primitives.U256, STACK_LIMIT) catch
+        const backing = alloc_mod.get().alloc(primitives.U256, STACK_LIMIT) catch
             @panic("failed to allocate EVM stack");
         return Stack{ .data = backing, .length = 0 };
     }
 
     /// Free the backing allocation.
     pub fn deinit(self: *Stack) void {
-        std.heap.c_allocator.free(self.data);
+        alloc_mod.get().free(self.data);
     }
 
     /// Get the length of the stack

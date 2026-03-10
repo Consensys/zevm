@@ -6,6 +6,7 @@ const state = @import("state");
 const bytecode = @import("bytecode");
 const interpreter_mod = @import("interpreter");
 const main = @import("main.zig");
+const alloc_mod = @import("zevm_allocator");
 const validation = @import("validation.zig");
 
 /// Mainnet EVM — heap-allocated wrapper that owns its Instructions, Precompiles, and FrameStack.
@@ -47,7 +48,7 @@ pub const MainnetEvm = struct {
 
     /// Free the heap allocation created by `buildMainnet` / `buildMainnetWithInspector`.
     pub fn destroy(self: *MainnetEvm) void {
-        std.heap.c_allocator.destroy(self);
+        alloc_mod.get().destroy(self);
     }
 };
 
@@ -60,7 +61,7 @@ pub const MainBuilder = struct {
     /// Returns a heap-allocated `*MainnetEvm`; call `evm.destroy()` when done.
     pub fn buildMainnet(self: *MainnetContext) *MainnetEvm {
         const spec = self.cfg.spec;
-        const owned = std.heap.c_allocator.create(MainnetEvm) catch @panic("OOM in buildMainnet");
+        const owned = alloc_mod.get().create(MainnetEvm) catch @panic("OOM in buildMainnet");
         owned.instructions = main.Instructions.new(spec);
         owned.precompiles = main.Precompiles.new(spec);
         owned.frame_stack = main.FrameStack.newPrealloc(8);
@@ -72,7 +73,7 @@ pub const MainBuilder = struct {
     /// Returns a heap-allocated `*MainnetEvm`; call `evm.destroy()` when done.
     pub fn buildMainnetWithInspector(self: *MainnetContext, inspector: *main.Inspector) *MainnetEvm {
         const spec = self.cfg.spec;
-        const owned = std.heap.c_allocator.create(MainnetEvm) catch @panic("OOM in buildMainnetWithInspector");
+        const owned = alloc_mod.get().create(MainnetEvm) catch @panic("OOM in buildMainnetWithInspector");
         owned.instructions = main.Instructions.new(spec);
         owned.precompiles = main.Precompiles.new(spec);
         owned.frame_stack = main.FrameStack.newPrealloc(8);
@@ -85,7 +86,7 @@ pub const MainBuilder = struct {
 pub const MainContext = struct {
     /// Create new mainnet context
     pub fn mainnet() MainnetContext {
-        const db = database.InMemoryDB.init(std.heap.c_allocator);
+        const db = database.InMemoryDB.init(alloc_mod.get());
         return context.Context.new(db, primitives.SpecId.prague);
     }
 };
@@ -251,7 +252,7 @@ pub const MainnetHandler = struct {
         };
 
         var return_data_buf: std.ArrayList(u8) = .{};
-        defer return_data_buf.deinit(std.heap.c_allocator);
+        defer return_data_buf.deinit(alloc_mod.get());
 
         switch (tx.kind) {
             .Create => {
@@ -261,7 +262,7 @@ pub const MainnetHandler = struct {
                     .failed => |r| {
                         const status: main.ExecutionStatus = if (r.is_revert) .Revert else .Halt;
                         var exec_result = main.ExecutionResult.new(status, exec_gas - r.gas_remaining);
-                        exec_result.return_data = std.heap.c_allocator.dupe(u8, r.return_data) catch @constCast(&[_]u8{});
+                        exec_result.return_data = alloc_mod.get().dupe(u8, r.return_data) catch @constCast(&[_]u8{});
                         return main.FrameResult.new(exec_result, r.gas_remaining, r.gas_refunded);
                     },
                     .ready => |s| {
@@ -287,7 +288,7 @@ pub const MainnetHandler = struct {
                         const cr = host.finalizeCreate(s.checkpoint, s.new_addr, ir.raw_result, ir.gas_remaining, ir.gas_refunded, ir.return_data, spec);
                         const cr_status: main.ExecutionStatus = if (cr.success) .Success else if (cr.is_revert) .Revert else .Halt;
                         var exec_result = main.ExecutionResult.new(cr_status, exec_gas - cr.gas_remaining);
-                        exec_result.return_data = std.heap.c_allocator.dupe(u8, cr.return_data) catch @constCast(&[_]u8{});
+                        exec_result.return_data = alloc_mod.get().dupe(u8, cr.return_data) catch @constCast(&[_]u8{});
                         return main.FrameResult.new(exec_result, cr.gas_remaining, cr.gas_refunded);
                     },
                 }
@@ -385,7 +386,7 @@ pub const MainnetHandler = struct {
                     else => .Halt,
                 };
                 var exec_result = main.ExecutionResult.new(status, exec_gas - ir.gas_remaining);
-                exec_result.return_data = std.heap.c_allocator.dupe(u8, ir.return_data) catch @constCast(&[_]u8{});
+                exec_result.return_data = alloc_mod.get().dupe(u8, ir.return_data) catch @constCast(&[_]u8{});
                 return main.FrameResult.new(exec_result, ir.gas_remaining, ir.gas_refunded);
             },
         }
@@ -524,9 +525,9 @@ fn executeIterative(
     var frames = std.ArrayList(FrameEntry){};
     defer {
         for (frames.items) |*f| f.interp.deinit();
-        frames.deinit(std.heap.c_allocator);
+        frames.deinit(alloc_mod.get());
     }
-    try frames.append(std.heap.c_allocator, .{ .interp = root_interp, .cause = null });
+    try frames.append(alloc_mod.get(), .{ .interp = root_interp, .cause = null });
 
     while (true) {
         const frame = &frames.items[frames.items.len - 1];
@@ -561,7 +562,7 @@ fn executeIterative(
                         spec,
                         pc.inputs.gas_limit,
                     );
-                    try frames.append(std.heap.c_allocator, .{ .interp = sub_interp, .cause = .{ .call = pc } });
+                    try frames.append(alloc_mod.get(), .{ .interp = sub_interp, .cause = .{ .call = pc } });
                 },
                 .create => |pc| {
                     const init_bytecode = bytecode.Bytecode.newRaw(pc.inputs.init_code);
@@ -582,7 +583,7 @@ fn executeIterative(
                         spec,
                         pc.inputs.gas_limit,
                     );
-                    try frames.append(std.heap.c_allocator, .{ .interp = sub_interp, .cause = .{ .create = pc } });
+                    try frames.append(alloc_mod.get(), .{ .interp = sub_interp, .cause = .{ .create = pc } });
                 },
                 .none => unreachable,
             }
@@ -598,7 +599,7 @@ fn executeIterative(
                 else
                     &[_]u8{};
                 return_data_buf.clearRetainingCapacity();
-                return_data_buf.appendSlice(std.heap.c_allocator, rd_raw) catch {};
+                return_data_buf.appendSlice(alloc_mod.get(), rd_raw) catch {};
                 // defer fires here, deiniting frames[0].interp — return_data_buf is safe.
                 return IterativeResult{
                     .raw_result = raw,
@@ -617,7 +618,7 @@ fn executeIterative(
             else
                 &[_]u8{};
             return_data_buf.clearRetainingCapacity();
-            return_data_buf.appendSlice(std.heap.c_allocator, rd_raw) catch {};
+            return_data_buf.appendSlice(alloc_mod.get(), rd_raw) catch {};
 
             const cause = frame.cause orelse unreachable;
             frame.interp.deinit();

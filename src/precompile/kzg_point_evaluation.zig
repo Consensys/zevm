@@ -1,14 +1,6 @@
 const std = @import("std");
-const primitives = @import("primitives");
-const main = @import("main.zig");
+const T = @import("precompile_types");
 const blst_wrapper = @import("blst_wrapper.zig");
-
-/// KZG point evaluation precompile
-pub const POINT_EVALUATION = main.Precompile.new(
-    main.PrecompileId.KzgPointEvaluation,
-    main.u64ToAddress(0x0A),
-    kzgPointEvaluationRun,
-);
 
 /// Gas cost of the KZG point evaluation precompile
 pub const GAS_COST: u64 = 50_000;
@@ -37,14 +29,14 @@ pub const RETURN_VALUE: [64]u8 = .{
 /// | versioned_hash |  z  |  y  | commitment | proof |
 /// |     32         | 32  | 32  |     48     |   48  |
 /// Total: 192 bytes
-pub fn kzgPointEvaluationRun(input: []const u8, gas_limit: u64) main.PrecompileResult {
+pub fn kzgPointEvaluationRun(input: []const u8, gas_limit: u64) T.PrecompileResult {
     if (gas_limit < GAS_COST) {
-        return main.PrecompileResult{ .err = main.PrecompileError.OutOfGas };
+        return T.PrecompileResult{ .err = T.PrecompileError.OutOfGas };
     }
 
     // Verify input length
     if (input.len != 192) {
-        return main.PrecompileResult{ .err = main.PrecompileError.BlobInvalidInputLength };
+        return T.PrecompileResult{ .err = T.PrecompileError.BlobInvalidInputLength };
     }
 
     // Parse input
@@ -57,10 +49,10 @@ pub fn kzgPointEvaluationRun(input: []const u8, gas_limit: u64) main.PrecompileR
     // Validate z and y are valid BLS12-381 scalar field elements (must be < BLS_MODULUS).
     // Per EIP-4844, inputs with z >= BLS_MODULUS or y >= BLS_MODULUS must be rejected.
     if (std.mem.order(u8, z, &BLS_MODULUS) != .lt) {
-        return main.PrecompileResult{ .err = main.PrecompileError.BlobVerifyKzgProofFailed };
+        return T.PrecompileResult{ .err = T.PrecompileError.BlobVerifyKzgProofFailed };
     }
     if (std.mem.order(u8, y, &BLS_MODULUS) != .lt) {
-        return main.PrecompileResult{ .err = main.PrecompileError.BlobVerifyKzgProofFailed };
+        return T.PrecompileResult{ .err = T.PrecompileError.BlobVerifyKzgProofFailed };
     }
 
     // Verify commitment matches versioned_hash
@@ -69,7 +61,7 @@ pub fn kzgPointEvaluationRun(input: []const u8, gas_limit: u64) main.PrecompileR
     computed_hash[0] = VERSIONED_HASH_VERSION_KZG;
 
     if (!std.mem.eql(u8, versioned_hash, &computed_hash)) {
-        return main.PrecompileResult{ .err = main.PrecompileError.BlobMismatchedVersion };
+        return T.PrecompileResult{ .err = T.PrecompileError.BlobMismatchedVersion };
     }
 
     // Verify KZG proof
@@ -84,11 +76,11 @@ pub fn kzgPointEvaluationRun(input: []const u8, gas_limit: u64) main.PrecompileR
         verifyKzgProof(commitment_bytes, z_bytes, y_bytes, proof_bytes);
 
     if (!proof_valid) {
-        return main.PrecompileResult{ .err = main.PrecompileError.BlobVerifyKzgProofFailed };
+        return T.PrecompileResult{ .err = T.PrecompileError.BlobVerifyKzgProofFailed };
     }
 
     // Return FIELD_ELEMENTS_PER_BLOB and BLS_MODULUS
-    return main.PrecompileResult{ .success = main.PrecompileOutput.new(GAS_COST, &RETURN_VALUE) };
+    return T.PrecompileResult{ .success = T.PrecompileOutput.new(GAS_COST, &RETURN_VALUE) };
 }
 
 /// Verify KZG proof

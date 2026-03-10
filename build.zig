@@ -29,10 +29,63 @@ pub fn build(b: *std.Build) void {
     const mcl_include_path = b.option([]const u8, "mcl-include", "Path to mcl include directory") orelse default_include_path;
 
     // Add compile flags for optional libraries
+    const enable_secp256k1 = b.option(bool, "secp256k1", "Enable secp256k1 library for ECRECOVER") orelse true;
+    const enable_openssl = b.option(bool, "openssl", "Enable OpenSSL library for P256Verify") orelse true;
+
     const lib_options = b.addOptions();
     lib_options.addOption(bool, "enable_blst", enable_blst);
     lib_options.addOption(bool, "enable_mcl", enable_mcl);
+    lib_options.addOption(bool, "enable_secp256k1", enable_secp256k1);
+    lib_options.addOption(bool, "enable_openssl", enable_openssl);
     const lib_options_module = lib_options.createModule();
+
+    // Default allocator module — returns std.heap.c_allocator.
+    // Downstream builds override this by calling:
+    //   module.addImport("zevm_allocator", their_module)
+    // after obtaining the module from this dependency.
+    const zevm_allocator_module = b.addModule("zevm_allocator", .{
+        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/allocator.zig" } },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Core precompile types (no external deps) — shared between precompile
+    // module and any precompile_overrides module to avoid circular imports.
+    const precompile_types_module = b.addModule("precompile_types", .{
+        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/precompile/types.zig" } },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Primitives module — defined early so native_impls_module can reference it.
+    const primitives_module = b.addModule("primitives", .{
+        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/primitives/main.zig" } },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Native precompile implementations — all host-OS (secp256k1, mcl, blst, openssl).
+    // Downstream freestanding builds replace this by injecting their own module:
+    //   precompile_module.addImport("precompile_implementations", your_module)
+    const native_impls_module = b.addModule("precompile_implementations", .{
+        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/precompile/native_impls.zig" } },
+        .target = target,
+        .optimize = optimize,
+    });
+    native_impls_module.addImport("precompile_types", precompile_types_module);
+    native_impls_module.addImport("build_options", lib_options_module);
+    native_impls_module.addImport("zevm_allocator", zevm_allocator_module);
+    native_impls_module.addImport("primitives", primitives_module);
+
+    // Exposes raw C-library wrapper namespaces for external consumers who need
+    // direct access to secp256k1/openssl/blst/mcl APIs.
+    const precompile_backends_native_module = b.addModule("precompile.backends.native", .{
+        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/precompile/backends/native.zig" } },
+        .target = target,
+        .optimize = optimize,
+    });
+    precompile_backends_native_module.addImport("build_options", lib_options_module);
+    precompile_backends_native_module.addImport("precompile_types", precompile_types_module);
 
     // Helper function to remove duplicate rpaths on macOS
     //
@@ -284,12 +337,6 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(lib);
 
     // Create modules for each component
-    const primitives_module = b.addModule("primitives", .{
-        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/primitives/main.zig" } },
-        .target = target,
-        .optimize = optimize,
-    });
-
     const bytecode_module = b.addModule("bytecode", .{
         .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/bytecode/main.zig" } },
         .target = target,
@@ -340,8 +387,10 @@ pub fn build(b: *std.Build) void {
 
     // Add module dependencies
     bytecode_module.addImport("primitives", primitives_module);
+    bytecode_module.addImport("zevm_allocator", zevm_allocator_module);
     state_module.addImport("primitives", primitives_module);
     state_module.addImport("bytecode", bytecode_module);
+    state_module.addImport("zevm_allocator", zevm_allocator_module);
     database_module.addImport("primitives", primitives_module);
     database_module.addImport("state", state_module);
     database_module.addImport("bytecode", bytecode_module);
@@ -349,14 +398,18 @@ pub fn build(b: *std.Build) void {
     context_module.addImport("bytecode", bytecode_module);
     context_module.addImport("state", state_module);
     context_module.addImport("database", database_module);
+    context_module.addImport("zevm_allocator", zevm_allocator_module);
     interpreter_module.addImport("primitives", primitives_module);
     interpreter_module.addImport("bytecode", bytecode_module);
     interpreter_module.addImport("context", context_module);
     interpreter_module.addImport("database", database_module);
     interpreter_module.addImport("state", state_module);
     interpreter_module.addImport("precompile", precompile_module);
-    precompile_module.addImport("build_options", lib_options_module);
+    interpreter_module.addImport("zevm_allocator", zevm_allocator_module);
     precompile_module.addImport("primitives", primitives_module);
+    precompile_module.addImport("zevm_allocator", zevm_allocator_module);
+    precompile_module.addImport("precompile_types", precompile_types_module);
+    precompile_module.addImport("precompile_implementations", native_impls_module);
     handler_module.addImport("primitives", primitives_module);
     handler_module.addImport("bytecode", bytecode_module);
     handler_module.addImport("state", state_module);
@@ -364,6 +417,7 @@ pub fn build(b: *std.Build) void {
     handler_module.addImport("interpreter", interpreter_module);
     handler_module.addImport("context", context_module);
     handler_module.addImport("precompile", precompile_module);
+    handler_module.addImport("zevm_allocator", zevm_allocator_module);
     inspector_module.addImport("primitives", primitives_module);
     inspector_module.addImport("interpreter", interpreter_module);
 
@@ -454,6 +508,7 @@ pub fn build(b: *std.Build) void {
     interpreter_tests.root_module.addImport("database", database_module);
     interpreter_tests.root_module.addImport("state", state_module);
     interpreter_tests.root_module.addImport("precompile", precompile_module);
+    interpreter_tests.root_module.addImport("zevm_allocator", zevm_allocator_module);
     addCryptoLibraries(b, interpreter_tests, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
     const run_interpreter_tests = b.addRunArtifact(interpreter_tests);
     test_step.dependOn(&run_interpreter_tests.step);
@@ -473,6 +528,7 @@ pub fn build(b: *std.Build) void {
     handler_tests.root_module.addImport("state", state_module);
     handler_tests.root_module.addImport("interpreter", interpreter_module);
     handler_tests.root_module.addImport("precompile", precompile_module);
+    handler_tests.root_module.addImport("zevm_allocator", zevm_allocator_module);
     addCryptoLibraries(b, handler_tests, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
     const run_handler_tests = b.addRunArtifact(handler_tests);
     test_step.dependOn(&run_handler_tests.step);
@@ -713,6 +769,7 @@ pub fn build(b: *std.Build) void {
     runner_mod.addImport("state", state_module);
     runner_mod.addImport("precompile", precompile_module);
     runner_mod.addImport("handler", handler_module);
+    runner_mod.addImport("zevm_allocator", zevm_allocator_module);
 
     addCryptoLibraries(b, runner_exe, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
     b.installArtifact(runner_exe);

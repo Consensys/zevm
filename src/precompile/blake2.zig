@@ -1,6 +1,7 @@
 const std = @import("std");
 const primitives = @import("primitives");
 const main = @import("main.zig");
+const alloc_mod = @import("zevm_allocator");
 
 /// BLAKE2 compression function precompile
 pub const FUN = main.Precompile.new(
@@ -63,7 +64,7 @@ pub fn blake2fRun(input: []const u8, gas_limit: u64) main.PrecompileResult {
         std.mem.writeInt(u64, output[i * 8 ..][0..8], h[i], .little);
     }
 
-    const heap_out = std.heap.c_allocator.dupe(u8, &output) catch
+    const heap_out = alloc_mod.get().dupe(u8, &output) catch
         return main.PrecompileResult{ .err = main.PrecompileError.OutOfGas };
     return main.PrecompileResult{ .success = main.PrecompileOutput.new(gas_used, heap_out) };
 }

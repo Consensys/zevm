@@ -1,6 +1,7 @@
 const std = @import("std");
 const primitives = @import("primitives");
 const main = @import("main.zig");
+const alloc_mod = @import("zevm_allocator");
 
 /// Modular exponentiation precompiles for different specs
 pub const BYZANTIUM = main.Precompile.new(
@@ -222,7 +223,7 @@ fn runInner(
         if (data_after_header.len >= total_data_len) {
             break :blk data_after_header[0..total_data_len];
         } else {
-            const buf = std.heap.c_allocator.alloc(u8, total_data_len) catch
+            const buf = alloc_mod.get().alloc(u8, total_data_len) catch
                 return main.PrecompileResult{ .err = main.PrecompileError.OutOfGas };
             @memset(buf, 0);
             @memcpy(buf[0..data_after_header.len], data_after_header);
@@ -230,7 +231,7 @@ fn runInner(
             break :blk buf;
         }
     };
-    defer if (data_buf) |buf| std.heap.c_allocator.free(buf);
+    defer if (data_buf) |buf| alloc_mod.get().free(buf);
 
     const base = if (base_len > 0) data[0..base_len] else &[_]u8{};
     const exp = if (exp_len > 0) data[base_len..][0..exp_len] else &[_]u8{};
@@ -238,7 +239,7 @@ fn runInner(
 
     // Allocate output buffer (left-padded with zeros to mod_len bytes) via c_allocator.
     // This buffer is owned by the caller and must NOT be freed here.
-    const heap_out = std.heap.c_allocator.alloc(u8, mod_len) catch
+    const heap_out = alloc_mod.get().alloc(u8, mod_len) catch
         return main.PrecompileResult{ .err = main.PrecompileError.OutOfGas };
     @memset(heap_out, 0);
     modexpIntoBuffer(base, exp, modulus, heap_out);
@@ -295,7 +296,7 @@ fn modexpIntoBuffer(base: []const u8, exponent: []const u8, modulus: []const u8,
     }
 
     // For larger values: use big-integer modular exponentiation
-    modexpBigInt(std.heap.c_allocator, base, exponent, modulus, output) catch {};
+    modexpBigInt(alloc_mod.get(), base, exponent, modulus, output) catch {};
 }
 
 /// Big-integer modular exponentiation using std.math.big.int.Managed.

@@ -1,5 +1,6 @@
 const std = @import("std");
 const primitives = @import("primitives");
+const alloc_mod = @import("zevm_allocator");
 
 /// EVM memory implementation using a shared buffer
 pub const Memory = struct {
@@ -34,7 +35,7 @@ pub const Memory = struct {
 
     /// Deinitialize the memory
     pub fn deinit(self: *Memory) void {
-        self.buffer.deinit(std.heap.c_allocator);
+        self.buffer.deinit(alloc_mod.get());
     }
 
     /// Get the current memory size
@@ -58,7 +59,7 @@ pub const Memory = struct {
 
         // Expand memory if necessary
         if (end_offset > self.buffer.items.len) {
-            try self.buffer.resize(std.heap.c_allocator, end_offset);
+            try self.buffer.resize(alloc_mod.get(), end_offset);
         }
 
         // Copy data
@@ -76,7 +77,7 @@ pub const Memory = struct {
 
         // Expand memory if necessary
         if (end_offset > self.buffer.items.len) {
-            try self.buffer.resize(std.heap.c_allocator, end_offset);
+            try self.buffer.resize(alloc_mod.get(), end_offset);
         }
 
         // Copy data
@@ -135,7 +136,7 @@ pub const Memory = struct {
 
         // Expand memory if necessary
         if (end_offset > self.buffer.items.len) {
-            try self.buffer.resize(std.heap.c_allocator, end_offset);
+            try self.buffer.resize(alloc_mod.get(), end_offset);
         }
 
         // Copy data from global memory

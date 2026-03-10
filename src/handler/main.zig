@@ -4,6 +4,7 @@ const context = @import("context");
 const interpreter = @import("interpreter");
 const precompile = @import("precompile");
 const database = @import("database");
+const alloc_mod = @import("zevm_allocator");
 
 // Import handler modules
 const mainnet_builder = @import("mainnet_builder.zig");
@@ -62,13 +63,13 @@ pub const ExecutionResult = struct {
         // Free topic slices (heap-allocated via page_allocator by the journal's LOG opcodes).
         for (self.logs.items) |log| {
             if (log.topics.len > 0) {
-                std.heap.page_allocator.free(@constCast(log.topics));
+                alloc_mod.get().free(@constCast(log.topics));
             }
         }
-        self.logs.deinit(std.heap.page_allocator);
+        self.logs.deinit(alloc_mod.get());
         // Free heap-allocated return data copy (len==0 means static empty slice, skip).
         if (self.return_data.len > 0) {
-            std.heap.c_allocator.free(self.return_data);
+            alloc_mod.get().free(self.return_data);
         }
     }
 };
@@ -387,13 +388,13 @@ pub const FrameStack = struct {
     /// Create new frame stack with preallocated capacity
     pub fn newPrealloc(capacity: usize) FrameStack {
         var stack = FrameStack.new();
-        stack.frames.ensureTotalCapacity(std.heap.c_allocator, capacity) catch {};
+        stack.frames.ensureTotalCapacity(alloc_mod.get(), capacity) catch {};
         return stack;
     }
 
     /// Push frame
     pub fn push(self: *FrameStack, frame: Frame) !void {
-        try self.frames.append(std.heap.c_allocator, frame);
+        try self.frames.append(alloc_mod.get(), frame);
     }
 
     /// Pop frame

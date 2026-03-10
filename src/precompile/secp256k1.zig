@@ -1,16 +1,23 @@
 const std = @import("std");
-const primitives = @import("primitives");
-const main = @import("main.zig");
+const T = @import("precompile_types");
+const alloc_mod = @import("zevm_allocator");
 
-// Try to import secp256k1 wrapper, fall back to no-op if not available
-const secp256k1_wrapper = @import("secp256k1_wrapper.zig");
-
-/// ECRECOVER precompile
-pub const ECRECOVER = main.Precompile.new(
-    main.PrecompileId.EcRec,
-    main.u64ToAddress(1),
-    ecRecoverRun,
-);
+const build_options = @import("build_options");
+// Only analyze the C-wrapper when secp256k1 is enabled; on freestanding targets
+// (e.g. Zisk zkVM) this avoids the @cImport that requires libc headers.
+const secp256k1_wrapper = if (build_options.enable_secp256k1)
+    @import("secp256k1_wrapper.zig")
+else
+    struct {
+        const Context = struct {
+            pub fn ecrecover(_: *Context, _: [32]u8, _: [64]u8, _: u8) ?[20]u8 {
+                return null;
+            }
+        };
+        pub fn getContext() ?*Context {
+            return null;
+        }
+    };
 
 /// Right pad input to specified length
 fn rightPad(comptime len: usize, input: []const u8) [len]u8 {
@@ -27,11 +34,11 @@ fn rightPad(comptime len: usize, input: []const u8) [len]u8 {
 ///
 /// Output format:
 /// [32 bytes for recovered address]
-pub fn ecRecoverRun(input: []const u8, gas_limit: u64) main.PrecompileResult {
+pub fn ecRecoverRun(input: []const u8, gas_limit: u64) T.PrecompileResult {
     const ECRECOVER_BASE: u64 = 3_000;
 
     if (ECRECOVER_BASE > gas_limit) {
-        return main.PrecompileResult{ .err = main.PrecompileError.OutOfGas };
+        return T.PrecompileResult{ .err = T.PrecompileError.OutOfGas };
     }
 
     const padded_input = rightPad(128, input);
@@ -41,7 +48,7 @@ pub fn ecRecoverRun(input: []const u8, gas_limit: u64) main.PrecompileResult {
         (padded_input[63] == 27 or padded_input[63] == 28);
 
     if (!v_valid) {
-        return main.PrecompileResult{ .success = main.PrecompileOutput.new(ECRECOVER_BASE, &[_]u8{}) };
+        return T.PrecompileResult{ .success = T.PrecompileOutput.new(ECRECOVER_BASE, &[_]u8{}) };
     }
 
     const msg_bytes = padded_input[0..32];
@@ -61,12 +68,12 @@ pub fn ecRecoverRun(input: []const u8, gas_limit: u64) main.PrecompileResult {
             // Pad address to 32 bytes (left-padded with zeros)
             var output: [32]u8 = [_]u8{0} ** 32;
             @memcpy(output[12..32], &address);
-            const heap_out = std.heap.c_allocator.dupe(u8, &output) catch
-                return main.PrecompileResult{ .err = main.PrecompileError.OutOfGas };
-            return main.PrecompileResult{ .success = main.PrecompileOutput.new(ECRECOVER_BASE, heap_out) };
+            const heap_out = alloc_mod.get().dupe(u8, &output) catch
+                return T.PrecompileResult{ .err = T.PrecompileError.OutOfGas };
+            return T.PrecompileResult{ .success = T.PrecompileOutput.new(ECRECOVER_BASE, heap_out) };
         }
     }
 
     // If recovery failed or library not available, return empty result
-    return main.PrecompileResult{ .success = main.PrecompileOutput.new(ECRECOVER_BASE, &[_]u8{}) };
+    return T.PrecompileResult{ .success = T.PrecompileOutput.new(ECRECOVER_BASE, &[_]u8{}) };
 }

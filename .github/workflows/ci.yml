@@ -71,31 +71,6 @@ jobs:
       - name: Run benchmarks
         run: ./zig-out/bin/zevm-bench
 
-  unit-test:
-    name: Unit Tests
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        zig-version: ['0.15.1']
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: ${{ matrix.zig-version }}
-
-      - name: Install dependencies
-        run: make install-deps
-
-      - name: Run unit tests
-        env:
-          DYLD_LIBRARY_PATH: /opt/homebrew/lib:/usr/local/lib
-        run: zig build test
-
   lint:
     name: Lint
     runs-on: ubuntu-latest

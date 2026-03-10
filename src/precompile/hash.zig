@@ -2,6 +2,7 @@ const std = @import("std");
 const primitives = @import("primitives");
 const main = @import("main.zig");
 const ripemd160_impl = @import("ripemd160.zig");
+const alloc_mod = @import("zevm_allocator");
 
 /// SHA-256 precompile
 pub const SHA256 = main.Precompile.new(
@@ -33,7 +34,7 @@ pub fn sha256Run(input: []const u8, gas_limit: u64) main.PrecompileResult {
     var output: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(input, &output, .{});
 
-    const heap_out = std.heap.c_allocator.dupe(u8, &output) catch
+    const heap_out = alloc_mod.get().dupe(u8, &output) catch
         return main.PrecompileResult{ .err = main.PrecompileError.OutOfGas };
     return main.PrecompileResult{ .success = main.PrecompileOutput.new(cost, heap_out) };
 }
@@ -57,7 +58,7 @@ pub fn ripemd160Run(input: []const u8, gas_limit: u64) main.PrecompileResult {
     var padded_output: [32]u8 = [_]u8{0} ** 32;
     std.mem.copyForwards(u8, padded_output[12..32], &output);
 
-    const heap_out = std.heap.c_allocator.dupe(u8, &padded_output) catch
+    const heap_out = alloc_mod.get().dupe(u8, &padded_output) catch
         return main.PrecompileResult{ .err = main.PrecompileError.OutOfGas };
     return main.PrecompileResult{ .success = main.PrecompileOutput.new(gas_used, heap_out) };
 }

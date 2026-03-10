@@ -3,6 +3,7 @@ const primitives = @import("primitives");
 const InstructionContext = @import("../instruction_context.zig").InstructionContext;
 const gas_costs = @import("../gas_costs.zig");
 const host_module = @import("../host.zig");
+const alloc_mod = @import("zevm_allocator");
 
 // ---------------------------------------------------------------------------
 // Memory expansion helper (shared pattern from other opcode files)
@@ -27,7 +28,7 @@ fn expandMemory(ctx: *InstructionContext, new_size: usize) bool {
     }
     const aligned_size = new_words * 32;
     const old_size = ctx.interpreter.memory.size();
-    ctx.interpreter.memory.buffer.resize(std.heap.c_allocator, aligned_size) catch return false;
+    ctx.interpreter.memory.buffer.resize(alloc_mod.get(), aligned_size) catch return false;
     @memset(ctx.interpreter.memory.buffer.items[old_size..aligned_size], 0);
     return true;
 }

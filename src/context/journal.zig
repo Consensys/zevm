@@ -3,6 +3,7 @@ const primitives = @import("primitives");
 const state = @import("state");
 const bytecode = @import("bytecode");
 const database = @import("database");
+const alloc_mod = @import("zevm_allocator");
 
 /// Journal entry factory functions
 pub const JournalEntryFactory = struct {
@@ -180,15 +181,15 @@ pub const WarmAddresses = struct {
         return .{
             .coinbase = null,
             .precompiles = std.ArrayList(primitives.Address){},
-            .access_list = std.AutoHashMap(primitives.Address, std.ArrayList(primitives.StorageKey)).init(std.heap.c_allocator),
+            .access_list = std.AutoHashMap(primitives.Address, std.ArrayList(primitives.StorageKey)).init(alloc_mod.get()),
         };
     }
 
     pub fn deinit(self: *WarmAddresses) void {
-        self.precompiles.deinit(std.heap.c_allocator);
+        self.precompiles.deinit(alloc_mod.get());
         var iterator = self.access_list.iterator();
         while (iterator.next()) |entry| {
-            entry.value_ptr.deinit(std.heap.page_allocator);
+            entry.value_ptr.deinit(alloc_mod.get());
         }
         self.access_list.deinit();
     }
@@ -199,21 +200,21 @@ pub const WarmAddresses = struct {
 
     pub fn setPrecompileAddresses(self: *WarmAddresses, addresses: []const primitives.Address) !void {
         self.precompiles.clearRetainingCapacity();
-        try self.precompiles.appendSlice(std.heap.c_allocator, addresses);
+        try self.precompiles.appendSlice(alloc_mod.get(), addresses);
     }
 
     pub fn setAccessList(self: *WarmAddresses, access_list: std.HashMap(primitives.Address, std.ArrayList(primitives.StorageKey), std.hash_map.default_hash_fn(primitives.Address), std.hash_map.default_eql_fn(primitives.Address))) !void {
         // Clear existing access list
         var iterator = self.access_list.iterator();
         while (iterator.next()) |entry| {
-            entry.value_ptr.deinit(std.heap.page_allocator);
+            entry.value_ptr.deinit(alloc_mod.get());
         }
         self.access_list.clearRetainingCapacity();
 
         // Copy new access list
         var new_iterator = access_list.iterator();
         while (new_iterator.next()) |entry| {
-            var storage_keys = std.ArrayList(primitives.StorageKey).init(std.heap.page_allocator);
+            var storage_keys = std.ArrayList(primitives.StorageKey).init(alloc_mod.get());
             try storage_keys.appendSlice(entry.value_ptr.items);
             try self.access_list.put(entry.key_ptr.*, storage_keys);
         }
@@ -223,7 +224,7 @@ pub const WarmAddresses = struct {
         self.coinbase = null;
         var iterator = self.access_list.iterator();
         while (iterator.next()) |entry| {
-            entry.value_ptr.deinit(std.heap.page_allocator);
+            entry.value_ptr.deinit(alloc_mod.get());
         }
         self.access_list.clearRetainingCapacity();
     }
@@ -383,8 +384,8 @@ pub const JournalInner = struct {
 
     pub fn new() JournalInner {
         return .{
-            .evm_state = state.EvmState.init(std.heap.page_allocator),
-            .transient_storage = state.TransientStorage.init(std.heap.page_allocator),
+            .evm_state = state.EvmState.init(alloc_mod.get()),
+            .transient_storage = state.TransientStorage.init(alloc_mod.get()),
             .logs = std.ArrayList(primitives.Log){},
             .journal = std.ArrayList(JournalEntry){},
             .transaction_id = 0,
@@ -399,11 +400,11 @@ pub const JournalInner = struct {
         // Free heap-allocated topic slices before freeing the log list
         for (self.logs.items) |log| {
             if (log.topics.len > 0) {
-                std.heap.page_allocator.free(@constCast(log.topics));
+                alloc_mod.get().free(@constCast(log.topics));
             }
         }
-        self.logs.deinit(std.heap.page_allocator);
-        self.journal.deinit(std.heap.page_allocator);
+        self.logs.deinit(alloc_mod.get());
+        self.journal.deinit(alloc_mod.get());
         self.warm_addresses.deinit();
     }
 
@@ -443,7 +444,7 @@ pub const JournalInner = struct {
         // Free heap-allocated topic slices (in case takeLogs() was not called)
         for (self.logs.items) |log| {
             if (log.topics.len > 0) {
-                std.heap.page_allocator.free(@constCast(log.topics));
+                alloc_mod.get().free(@constCast(log.topics));
             }
         }
         self.logs.clearRetainingCapacity();
@@ -465,7 +466,7 @@ pub const JournalInner = struct {
         // Free heap-allocated topic slices before clearing the log list
         for (self.logs.items) |log| {
             if (log.topics.len > 0) {
-                std.heap.page_allocator.free(@constCast(log.topics));
+                alloc_mod.get().free(@constCast(log.topics));
             }
         }
         self.logs.clearRetainingCapacity();
@@ -481,11 +482,11 @@ pub const JournalInner = struct {
         self.warm_addresses.clearCoinbaseAndAccessList();
 
         const evm_state = self.evm_state;
-        self.evm_state = state.EvmState.init(std.heap.page_allocator);
+        self.evm_state = state.EvmState.init(alloc_mod.get());
         // Free heap-allocated topic slices before clearing the log list.
         for (self.logs.items) |log| {
             if (log.topics.len > 0) {
-                std.heap.page_allocator.free(@constCast(log.topics));
+                alloc_mod.get().free(@constCast(log.topics));
             }
         }
         self.logs.clearRetainingCapacity();
@@ -518,7 +519,7 @@ pub const JournalInner = struct {
     /// Mark account as touched.
     fn touchAccount(journal: *std.ArrayList(JournalEntry), address: primitives.Address, account: *state.Account) void {
         if (!account.isTouched()) {
-            journal.append(std.heap.page_allocator, JournalEntryFactory.accountTouched(address)) catch {};
+            journal.append(alloc_mod.get(), JournalEntryFactory.accountTouched(address)) catch {};
             account.markTouch();
         }
     }
@@ -541,7 +542,7 @@ pub const JournalInner = struct {
         const account = self.evm_state.getPtr(address).?;
         JournalInner.touchAccount(&self.journal, address, account);
 
-        self.journal.append(std.heap.page_allocator, JournalEntryFactory.codeChanged(address)) catch {};
+        self.journal.append(alloc_mod.get(), JournalEntryFactory.codeChanged(address)) catch {};
 
         account.info.code_hash = hash;
         account.info.code = code;
@@ -567,13 +568,13 @@ pub const JournalInner = struct {
     /// Add journal entry for caller accounting.
     pub fn callerAccountingJournalEntry(self: *JournalInner, address: primitives.Address, old_balance: primitives.U256, bump_nonce: bool) void {
         // account balance changed.
-        self.journal.append(std.heap.page_allocator, JournalEntryFactory.balanceChanged(address, old_balance)) catch {};
+        self.journal.append(alloc_mod.get(), JournalEntryFactory.balanceChanged(address, old_balance)) catch {};
         // account is touched.
-        self.journal.append(std.heap.page_allocator, JournalEntryFactory.accountTouched(address)) catch {};
+        self.journal.append(alloc_mod.get(), JournalEntryFactory.accountTouched(address)) catch {};
 
         if (bump_nonce) {
             // nonce changed.
-            self.journal.append(std.heap.page_allocator, JournalEntryFactory.nonceChanged(address)) catch {};
+            self.journal.append(alloc_mod.get(), JournalEntryFactory.nonceChanged(address)) catch {};
         }
     }
 
@@ -587,7 +588,7 @@ pub const JournalInner = struct {
 
     /// Increments the nonce of the account.
     pub fn nonceBumpJournalEntry(self: *JournalInner, address: primitives.Address) void {
-        self.journal.append(std.heap.page_allocator, JournalEntryFactory.nonceChanged(address)) catch {};
+        self.journal.append(alloc_mod.get(), JournalEntryFactory.nonceChanged(address)) catch {};
     }
 
     /// Transfers balance from two accounts. Returns error if sender balance is not enough.
@@ -625,7 +626,7 @@ pub const JournalInner = struct {
         to_balance.* = to_balance_incr;
 
         // add journal entry
-        self.journal.append(std.heap.page_allocator, JournalEntryFactory.balanceTransfer(from, to, balance)) catch {};
+        self.journal.append(alloc_mod.get(), JournalEntryFactory.balanceTransfer(from, to, balance)) catch {};
 
         return null;
     }
@@ -673,7 +674,7 @@ pub const JournalInner = struct {
         const is_created_globally = target_acc.markCreatedLocally();
 
         // this entry will revert set nonce.
-        last_journal.append(std.heap.page_allocator, JournalEntryFactory.accountCreated(target_address, is_created_globally)) catch {};
+        last_journal.append(alloc_mod.get(), JournalEntryFactory.accountCreated(target_address, is_created_globally)) catch {};
         target_acc.info.code = null;
         // EIP-161: State trie clearing (invariant-preserving alternative)
         if (primitives.isEnabledIn(spec_id, .spurious_dragon)) {
@@ -700,7 +701,7 @@ pub const JournalInner = struct {
         self.evm_state.getPtr(caller).?.info.balance = new_caller_balance;
 
         // add journal entry of transferred balance
-        last_journal.append(std.heap.page_allocator, JournalEntryFactory.balanceTransfer(caller, target_address, balance)) catch {};
+        last_journal.append(alloc_mod.get(), JournalEntryFactory.balanceTransfer(caller, target_address, balance)) catch {};
 
         return checkpoint;
     }
@@ -792,7 +793,7 @@ pub const JournalInner = struct {
         };
 
         if (journal_entry) |entry| {
-            self.journal.append(std.heap.page_allocator, entry) catch {};
+            self.journal.append(alloc_mod.get(), entry) catch {};
         }
 
         return StateLoad(SelfDestructResult).new(SelfDestructResult{
@@ -867,7 +868,7 @@ pub const JournalInner = struct {
             const new_account = if (try db.basic(address)) |account_info|
                 state.Account{
                     .info = account_info,
-                    .storage = std.AutoHashMap(primitives.StorageKey, state.EvmStorageSlot).init(std.heap.page_allocator),
+                    .storage = std.AutoHashMap(primitives.StorageKey, state.EvmStorageSlot).init(alloc_mod.get()),
                     .transaction_id = self.transaction_id,
                     .status = state.AccountStatus.empty(),
                 }
@@ -881,7 +882,7 @@ pub const JournalInner = struct {
 
         // Journal cold account load
         if (is_cold) {
-            self.journal.append(std.heap.page_allocator, JournalEntryFactory.accountWarmed(address)) catch {};
+            self.journal.append(alloc_mod.get(), JournalEntryFactory.accountWarmed(address)) catch {};
         }
 
         // Load code if requested and not yet loaded
@@ -918,7 +919,7 @@ pub const JournalInner = struct {
             }
             _ = slot.markWarmWithTransactionId(self.transaction_id);
             if (is_cold) {
-                self.journal.append(std.heap.page_allocator, JournalEntryFactory.storageWarmed(address, key)) catch {};
+                self.journal.append(alloc_mod.get(), JournalEntryFactory.storageWarmed(address, key)) catch {};
             }
             return StateLoad(primitives.StorageValue).new(slot.present_value, is_cold);
         } else {
@@ -933,7 +934,7 @@ pub const JournalInner = struct {
             try account.storage.put(key, state.EvmStorageSlot.new(value, self.transaction_id));
             const is_cold = !self.warm_addresses.isStorageWarm(address, key);
             if (is_cold) {
-                self.journal.append(std.heap.page_allocator, JournalEntryFactory.storageWarmed(address, key)) catch {};
+                self.journal.append(alloc_mod.get(), JournalEntryFactory.storageWarmed(address, key)) catch {};
             }
             return StateLoad(primitives.StorageValue).new(value, is_cold);
         }
@@ -961,7 +962,7 @@ pub const JournalInner = struct {
             }, present.is_cold);
         }
 
-        self.journal.append(std.heap.page_allocator, JournalEntryFactory.storageChanged(address, key, present.data)) catch {};
+        self.journal.append(alloc_mod.get(), JournalEntryFactory.storageChanged(address, key, present.data)) catch {};
         // insert value into present state.
         slot.present_value = new_value;
         return StateLoad(SStoreResult).new(SStoreResult{
@@ -991,19 +992,19 @@ pub const JournalInner = struct {
             // Remove entry from transient storage; journal only if there was a previous value.
             _ = self.transient_storage.remove(.{ address, key });
             if (previous_value != 0) {
-                self.journal.append(std.heap.page_allocator, JournalEntryFactory.transientStorageChanged(address, key, previous_value)) catch {};
+                self.journal.append(alloc_mod.get(), JournalEntryFactory.transientStorageChanged(address, key, previous_value)) catch {};
             }
         } else {
             self.transient_storage.put(.{ address, key }, new_value) catch {};
             if (previous_value != new_value) {
-                self.journal.append(std.heap.page_allocator, JournalEntryFactory.transientStorageChanged(address, key, previous_value)) catch {};
+                self.journal.append(alloc_mod.get(), JournalEntryFactory.transientStorageChanged(address, key, previous_value)) catch {};
             }
         }
     }
 
     /// Pushes log into subroutine.
     pub fn addLog(self: *JournalInner, log_entry: primitives.Log) void {
-        self.logs.append(std.heap.page_allocator, log_entry) catch {};
+        self.logs.append(alloc_mod.get(), log_entry) catch {};
     }
 };
 
