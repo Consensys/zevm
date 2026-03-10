@@ -209,10 +209,7 @@ pub const Precompile = struct {
     }
 };
 
-/// Calculate the linear cost of a precompile
-pub fn calcLinearCost(len: usize, base: u64, word: u64) u64 {
-    return (len + 31) / 32 * word + base;
-}
+pub const calcLinearCost = T.calcLinearCost;
 
 /// Convert u64 to address
 pub fn u64ToAddress(value: u64) primitives.Address {

@@ -77,6 +77,16 @@ pub fn build(b: *std.Build) void {
     native_impls_module.addImport("zevm_allocator", zevm_allocator_module);
     native_impls_module.addImport("primitives", primitives_module);
 
+    // Exposes raw C-library wrapper namespaces for external consumers who need
+    // direct access to secp256k1/openssl/blst/mcl APIs.
+    const precompile_backends_native_module = b.addModule("precompile.backends.native", .{
+        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/precompile/backends/native.zig" } },
+        .target = target,
+        .optimize = optimize,
+    });
+    precompile_backends_native_module.addImport("build_options", lib_options_module);
+    precompile_backends_native_module.addImport("precompile_types", precompile_types_module);
+
     // Helper function to remove duplicate rpaths on macOS
     //
     // ROOT CAUSE:
