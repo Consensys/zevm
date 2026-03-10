@@ -14,7 +14,9 @@ else
                 return null;
             }
         };
-        pub fn getContext() ?*Context { return null; }
+        pub fn getContext() ?*Context {
+            return null;
+        }
     };
 
 /// Right pad input to specified length

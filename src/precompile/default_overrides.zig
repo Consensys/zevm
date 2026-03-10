@@ -9,7 +9,6 @@
 ///
 /// The override module must export all of the same pub const names as this file.
 /// Any name left null will fall through to the default implementation.
-
 const T = @import("precompile_types");
 
 // ── Homestead ──────────────────────────────────────────────────────────────

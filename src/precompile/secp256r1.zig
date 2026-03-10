@@ -48,7 +48,9 @@ const openssl_wrapper = if (build_options.enable_openssl)
     @import("openssl_wrapper.zig")
 else
     struct {
-        pub fn verifyP256(_: [32]u8, _: [64]u8, _: [64]u8) bool { return false; }
+        pub fn verifyP256(_: [32]u8, _: [64]u8, _: [64]u8) bool {
+            return false;
+        }
     };
 
 /// Verify secp256r1 signature

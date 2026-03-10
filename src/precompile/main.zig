@@ -5,10 +5,10 @@ const primitives = @import("primitives");
 // "precompile_overrides" build module can import them without creating a
 // circular module dependency.  main.zig re-exports them for backward compat.
 const T = @import("precompile_types");
-pub const PrecompileError  = T.PrecompileError;
+pub const PrecompileError = T.PrecompileError;
 pub const PrecompileOutput = T.PrecompileOutput;
 pub const PrecompileResult = T.PrecompileResult;
-pub const PrecompileFn     = T.PrecompileFn;
+pub const PrecompileFn = T.PrecompileFn;
 
 // Complete precompile implementation table.  For native builds this is
 // native_impls.zig (all host-OS implementations).  Inject a custom module via
@@ -109,10 +109,10 @@ pub const PrecompileId = union(enum) {
     /// their built-in implementations directly.
     pub fn precompile(self: PrecompileId, spec: PrecompileSpecId) ?Precompile {
         return switch (self) {
-            .EcRec      => Precompile.new(.EcRec, u64ToAddress(1), impls.ecrecover),
-            .Sha256     => hash.SHA256,
-            .Ripemd160  => hash.RIPEMD160,
-            .Identity   => identity.FUN,
+            .EcRec => Precompile.new(.EcRec, u64ToAddress(1), impls.ecrecover),
+            .Sha256 => hash.SHA256,
+            .Ripemd160 => hash.RIPEMD160,
+            .Identity => identity.FUN,
             .ModExp => blk: {
                 const spec_i = @intFromEnum(spec);
                 if (spec_i < @intFromEnum(PrecompileSpecId.Berlin)) {
@@ -135,15 +135,15 @@ pub const PrecompileId = union(enum) {
                 Precompile.new(.Bn254Pairing, u64ToAddress(8), impls.bn254_pairing_byzantium)
             else
                 Precompile.new(.Bn254Pairing, u64ToAddress(8), impls.bn254_pairing_istanbul),
-            .Blake2F             => blake2.FUN,
-            .KzgPointEvaluation  => Precompile.new(.KzgPointEvaluation, u64ToAddress(0x0A), impls.kzg_point_evaluation),
-            .Bls12G1Add          => Precompile.new(.Bls12G1Add,    u64ToAddress(0x0B), impls.bls12_g1_add),
-            .Bls12G1Msm          => Precompile.new(.Bls12G1Msm,    u64ToAddress(0x0C), impls.bls12_g1_msm),
-            .Bls12G2Add          => Precompile.new(.Bls12G2Add,    u64ToAddress(0x0D), impls.bls12_g2_add),
-            .Bls12G2Msm          => Precompile.new(.Bls12G2Msm,    u64ToAddress(0x0E), impls.bls12_g2_msm),
-            .Bls12Pairing        => Precompile.new(.Bls12Pairing,  u64ToAddress(0x0F), impls.bls12_pairing),
-            .Bls12MapFpToGp1     => Precompile.new(.Bls12MapFpToGp1,  u64ToAddress(0x10), impls.bls12_map_fp_to_g1),
-            .Bls12MapFp2ToGp2    => Precompile.new(.Bls12MapFp2ToGp2, u64ToAddress(0x11), impls.bls12_map_fp2_to_g2),
+            .Blake2F => blake2.FUN,
+            .KzgPointEvaluation => Precompile.new(.KzgPointEvaluation, u64ToAddress(0x0A), impls.kzg_point_evaluation),
+            .Bls12G1Add => Precompile.new(.Bls12G1Add, u64ToAddress(0x0B), impls.bls12_g1_add),
+            .Bls12G1Msm => Precompile.new(.Bls12G1Msm, u64ToAddress(0x0C), impls.bls12_g1_msm),
+            .Bls12G2Add => Precompile.new(.Bls12G2Add, u64ToAddress(0x0D), impls.bls12_g2_add),
+            .Bls12G2Msm => Precompile.new(.Bls12G2Msm, u64ToAddress(0x0E), impls.bls12_g2_msm),
+            .Bls12Pairing => Precompile.new(.Bls12Pairing, u64ToAddress(0x0F), impls.bls12_pairing),
+            .Bls12MapFpToGp1 => Precompile.new(.Bls12MapFpToGp1, u64ToAddress(0x10), impls.bls12_map_fp_to_g1),
+            .Bls12MapFp2ToGp2 => Precompile.new(.Bls12MapFp2ToGp2, u64ToAddress(0x11), impls.bls12_map_fp2_to_g2),
             .P256Verify => if (@intFromEnum(spec) < @intFromEnum(PrecompileSpecId.Osaka))
                 Precompile.new(.P256Verify, u64ToAddress(256), impls.p256verify)
             else
@@ -281,43 +281,43 @@ pub const Precompiles = struct {
                 precompiles.add(identity.FUN) catch {};
                 precompiles.add(hash.SHA256) catch {};
                 precompiles.add(hash.RIPEMD160) catch {};
-                precompiles.add(Precompile.new(.EcRec,       u64ToAddress(1), impls.ecrecover)) catch {};
+                precompiles.add(Precompile.new(.EcRec, u64ToAddress(1), impls.ecrecover)) catch {};
                 precompiles.add(modexp.BYZANTIUM) catch {};
-                precompiles.add(Precompile.new(.Bn254Add,    u64ToAddress(6), impls.bn254_add_byzantium)) catch {};
-                precompiles.add(Precompile.new(.Bn254Mul,    u64ToAddress(7), impls.bn254_mul_byzantium)) catch {};
-                precompiles.add(Precompile.new(.Bn254Pairing,u64ToAddress(8), impls.bn254_pairing_byzantium)) catch {};
+                precompiles.add(Precompile.new(.Bn254Add, u64ToAddress(6), impls.bn254_add_byzantium)) catch {};
+                precompiles.add(Precompile.new(.Bn254Mul, u64ToAddress(7), impls.bn254_mul_byzantium)) catch {};
+                precompiles.add(Precompile.new(.Bn254Pairing, u64ToAddress(8), impls.bn254_pairing_byzantium)) catch {};
             },
             .Istanbul => {
                 precompiles.add(identity.FUN) catch {};
                 precompiles.add(hash.SHA256) catch {};
                 precompiles.add(hash.RIPEMD160) catch {};
-                precompiles.add(Precompile.new(.EcRec,       u64ToAddress(1), impls.ecrecover)) catch {};
+                precompiles.add(Precompile.new(.EcRec, u64ToAddress(1), impls.ecrecover)) catch {};
                 precompiles.add(modexp.BYZANTIUM) catch {};
-                precompiles.add(Precompile.new(.Bn254Add,    u64ToAddress(6), impls.bn254_add_istanbul)) catch {};
-                precompiles.add(Precompile.new(.Bn254Mul,    u64ToAddress(7), impls.bn254_mul_istanbul)) catch {};
-                precompiles.add(Precompile.new(.Bn254Pairing,u64ToAddress(8), impls.bn254_pairing_istanbul)) catch {};
+                precompiles.add(Precompile.new(.Bn254Add, u64ToAddress(6), impls.bn254_add_istanbul)) catch {};
+                precompiles.add(Precompile.new(.Bn254Mul, u64ToAddress(7), impls.bn254_mul_istanbul)) catch {};
+                precompiles.add(Precompile.new(.Bn254Pairing, u64ToAddress(8), impls.bn254_pairing_istanbul)) catch {};
                 precompiles.add(blake2.FUN) catch {};
             },
             .Berlin => {
                 precompiles.add(identity.FUN) catch {};
                 precompiles.add(hash.SHA256) catch {};
                 precompiles.add(hash.RIPEMD160) catch {};
-                precompiles.add(Precompile.new(.EcRec,       u64ToAddress(1), impls.ecrecover)) catch {};
+                precompiles.add(Precompile.new(.EcRec, u64ToAddress(1), impls.ecrecover)) catch {};
                 precompiles.add(modexp.BERLIN) catch {};
-                precompiles.add(Precompile.new(.Bn254Add,    u64ToAddress(6), impls.bn254_add_istanbul)) catch {};
-                precompiles.add(Precompile.new(.Bn254Mul,    u64ToAddress(7), impls.bn254_mul_istanbul)) catch {};
-                precompiles.add(Precompile.new(.Bn254Pairing,u64ToAddress(8), impls.bn254_pairing_istanbul)) catch {};
+                precompiles.add(Precompile.new(.Bn254Add, u64ToAddress(6), impls.bn254_add_istanbul)) catch {};
+                precompiles.add(Precompile.new(.Bn254Mul, u64ToAddress(7), impls.bn254_mul_istanbul)) catch {};
+                precompiles.add(Precompile.new(.Bn254Pairing, u64ToAddress(8), impls.bn254_pairing_istanbul)) catch {};
                 precompiles.add(blake2.FUN) catch {};
             },
             .Cancun => {
                 precompiles.add(identity.FUN) catch {};
                 precompiles.add(hash.SHA256) catch {};
                 precompiles.add(hash.RIPEMD160) catch {};
-                precompiles.add(Precompile.new(.EcRec,              u64ToAddress(1),    impls.ecrecover)) catch {};
+                precompiles.add(Precompile.new(.EcRec, u64ToAddress(1), impls.ecrecover)) catch {};
                 precompiles.add(modexp.BERLIN) catch {};
-                precompiles.add(Precompile.new(.Bn254Add,           u64ToAddress(6),    impls.bn254_add_istanbul)) catch {};
-                precompiles.add(Precompile.new(.Bn254Mul,           u64ToAddress(7),    impls.bn254_mul_istanbul)) catch {};
-                precompiles.add(Precompile.new(.Bn254Pairing,       u64ToAddress(8),    impls.bn254_pairing_istanbul)) catch {};
+                precompiles.add(Precompile.new(.Bn254Add, u64ToAddress(6), impls.bn254_add_istanbul)) catch {};
+                precompiles.add(Precompile.new(.Bn254Mul, u64ToAddress(7), impls.bn254_mul_istanbul)) catch {};
+                precompiles.add(Precompile.new(.Bn254Pairing, u64ToAddress(8), impls.bn254_pairing_istanbul)) catch {};
                 precompiles.add(blake2.FUN) catch {};
                 precompiles.add(Precompile.new(.KzgPointEvaluation, u64ToAddress(0x0A), impls.kzg_point_evaluation)) catch {};
             },
@@ -325,40 +325,40 @@ pub const Precompiles = struct {
                 precompiles.add(identity.FUN) catch {};
                 precompiles.add(hash.SHA256) catch {};
                 precompiles.add(hash.RIPEMD160) catch {};
-                precompiles.add(Precompile.new(.EcRec,              u64ToAddress(1),    impls.ecrecover)) catch {};
+                precompiles.add(Precompile.new(.EcRec, u64ToAddress(1), impls.ecrecover)) catch {};
                 precompiles.add(modexp.BERLIN) catch {};
-                precompiles.add(Precompile.new(.Bn254Add,           u64ToAddress(6),    impls.bn254_add_istanbul)) catch {};
-                precompiles.add(Precompile.new(.Bn254Mul,           u64ToAddress(7),    impls.bn254_mul_istanbul)) catch {};
-                precompiles.add(Precompile.new(.Bn254Pairing,       u64ToAddress(8),    impls.bn254_pairing_istanbul)) catch {};
+                precompiles.add(Precompile.new(.Bn254Add, u64ToAddress(6), impls.bn254_add_istanbul)) catch {};
+                precompiles.add(Precompile.new(.Bn254Mul, u64ToAddress(7), impls.bn254_mul_istanbul)) catch {};
+                precompiles.add(Precompile.new(.Bn254Pairing, u64ToAddress(8), impls.bn254_pairing_istanbul)) catch {};
                 precompiles.add(blake2.FUN) catch {};
                 precompiles.add(Precompile.new(.KzgPointEvaluation, u64ToAddress(0x0A), impls.kzg_point_evaluation)) catch {};
-                precompiles.add(Precompile.new(.Bls12G1Add,         u64ToAddress(0x0B), impls.bls12_g1_add)) catch {};
-                precompiles.add(Precompile.new(.Bls12G1Msm,         u64ToAddress(0x0C), impls.bls12_g1_msm)) catch {};
-                precompiles.add(Precompile.new(.Bls12G2Add,         u64ToAddress(0x0D), impls.bls12_g2_add)) catch {};
-                precompiles.add(Precompile.new(.Bls12G2Msm,         u64ToAddress(0x0E), impls.bls12_g2_msm)) catch {};
-                precompiles.add(Precompile.new(.Bls12Pairing,       u64ToAddress(0x0F), impls.bls12_pairing)) catch {};
-                precompiles.add(Precompile.new(.Bls12MapFpToGp1,    u64ToAddress(0x10), impls.bls12_map_fp_to_g1)) catch {};
-                precompiles.add(Precompile.new(.Bls12MapFp2ToGp2,   u64ToAddress(0x11), impls.bls12_map_fp2_to_g2)) catch {};
+                precompiles.add(Precompile.new(.Bls12G1Add, u64ToAddress(0x0B), impls.bls12_g1_add)) catch {};
+                precompiles.add(Precompile.new(.Bls12G1Msm, u64ToAddress(0x0C), impls.bls12_g1_msm)) catch {};
+                precompiles.add(Precompile.new(.Bls12G2Add, u64ToAddress(0x0D), impls.bls12_g2_add)) catch {};
+                precompiles.add(Precompile.new(.Bls12G2Msm, u64ToAddress(0x0E), impls.bls12_g2_msm)) catch {};
+                precompiles.add(Precompile.new(.Bls12Pairing, u64ToAddress(0x0F), impls.bls12_pairing)) catch {};
+                precompiles.add(Precompile.new(.Bls12MapFpToGp1, u64ToAddress(0x10), impls.bls12_map_fp_to_g1)) catch {};
+                precompiles.add(Precompile.new(.Bls12MapFp2ToGp2, u64ToAddress(0x11), impls.bls12_map_fp2_to_g2)) catch {};
             },
             .Osaka => {
                 precompiles.add(identity.FUN) catch {};
                 precompiles.add(hash.SHA256) catch {};
                 precompiles.add(hash.RIPEMD160) catch {};
-                precompiles.add(Precompile.new(.EcRec,              u64ToAddress(1),    impls.ecrecover)) catch {};
+                precompiles.add(Precompile.new(.EcRec, u64ToAddress(1), impls.ecrecover)) catch {};
                 precompiles.add(modexp.OSAKA) catch {};
-                precompiles.add(Precompile.new(.Bn254Add,           u64ToAddress(6),    impls.bn254_add_istanbul)) catch {};
-                precompiles.add(Precompile.new(.Bn254Mul,           u64ToAddress(7),    impls.bn254_mul_istanbul)) catch {};
-                precompiles.add(Precompile.new(.Bn254Pairing,       u64ToAddress(8),    impls.bn254_pairing_istanbul)) catch {};
+                precompiles.add(Precompile.new(.Bn254Add, u64ToAddress(6), impls.bn254_add_istanbul)) catch {};
+                precompiles.add(Precompile.new(.Bn254Mul, u64ToAddress(7), impls.bn254_mul_istanbul)) catch {};
+                precompiles.add(Precompile.new(.Bn254Pairing, u64ToAddress(8), impls.bn254_pairing_istanbul)) catch {};
                 precompiles.add(blake2.FUN) catch {};
                 precompiles.add(Precompile.new(.KzgPointEvaluation, u64ToAddress(0x0A), impls.kzg_point_evaluation)) catch {};
-                precompiles.add(Precompile.new(.Bls12G1Add,         u64ToAddress(0x0B), impls.bls12_g1_add)) catch {};
-                precompiles.add(Precompile.new(.Bls12G1Msm,         u64ToAddress(0x0C), impls.bls12_g1_msm)) catch {};
-                precompiles.add(Precompile.new(.Bls12G2Add,         u64ToAddress(0x0D), impls.bls12_g2_add)) catch {};
-                precompiles.add(Precompile.new(.Bls12G2Msm,         u64ToAddress(0x0E), impls.bls12_g2_msm)) catch {};
-                precompiles.add(Precompile.new(.Bls12Pairing,       u64ToAddress(0x0F), impls.bls12_pairing)) catch {};
-                precompiles.add(Precompile.new(.Bls12MapFpToGp1,    u64ToAddress(0x10), impls.bls12_map_fp_to_g1)) catch {};
-                precompiles.add(Precompile.new(.Bls12MapFp2ToGp2,   u64ToAddress(0x11), impls.bls12_map_fp2_to_g2)) catch {};
-                precompiles.add(Precompile.new(.P256Verify,         u64ToAddress(256),  impls.p256verify_osaka)) catch {};
+                precompiles.add(Precompile.new(.Bls12G1Add, u64ToAddress(0x0B), impls.bls12_g1_add)) catch {};
+                precompiles.add(Precompile.new(.Bls12G1Msm, u64ToAddress(0x0C), impls.bls12_g1_msm)) catch {};
+                precompiles.add(Precompile.new(.Bls12G2Add, u64ToAddress(0x0D), impls.bls12_g2_add)) catch {};
+                precompiles.add(Precompile.new(.Bls12G2Msm, u64ToAddress(0x0E), impls.bls12_g2_msm)) catch {};
+                precompiles.add(Precompile.new(.Bls12Pairing, u64ToAddress(0x0F), impls.bls12_pairing)) catch {};
+                precompiles.add(Precompile.new(.Bls12MapFpToGp1, u64ToAddress(0x10), impls.bls12_map_fp_to_g1)) catch {};
+                precompiles.add(Precompile.new(.Bls12MapFp2ToGp2, u64ToAddress(0x11), impls.bls12_map_fp2_to_g2)) catch {};
+                precompiles.add(Precompile.new(.P256Verify, u64ToAddress(256), impls.p256verify_osaka)) catch {};
             },
         }
 

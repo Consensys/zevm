@@ -3,7 +3,6 @@
 /// Defined here (rather than in main.zig) so that a "precompile_overrides"
 /// module can import these types without creating a circular module dependency.
 /// main.zig re-exports everything from this file for backward compatibility.
-
 /// Precompile error type
 pub const PrecompileError = error{
     OutOfGas,
