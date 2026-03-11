@@ -516,12 +516,18 @@ pub fn makeLogFn(comptime n: u8) *const fn (ctx: *InstructionContext) void {
 
             stack.shrinkUnsafe(2 + n);
 
-            // Get log data from memory (offset_u + size_u is safe; expandMemory verified it above)
+            // Get log data from memory — copy to heap so the data outlives the interpreter.
+            // The interpreter's memory buffer is freed when executeIterative returns (via defer),
+            // but log entries must remain valid until postExecution reads them from the journal.
             const log_end = offset_u + size_u; // won't overflow: expandMemory already checked this
-            const log_data: []const u8 = if (size_u > 0)
-                ctx.interpreter.memory.buffer.items[offset_u..log_end]
-            else
-                &[_]u8{};
+            const log_data: []const u8 = if (size_u > 0) blk: {
+                const src = ctx.interpreter.memory.buffer.items[offset_u..log_end];
+                const copy = alloc_mod.get().dupe(u8, src) catch {
+                    ctx.interpreter.halt(.out_of_gas);
+                    return;
+                };
+                break :blk copy;
+            } else &[_]u8{};
 
             // Emit the log
             const log_entry = primitives.Log{
