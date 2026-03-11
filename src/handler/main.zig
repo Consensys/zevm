@@ -60,12 +60,7 @@ pub const ExecutionResult = struct {
 
     /// Deinitialize execution result
     pub fn deinit(self: *ExecutionResult) void {
-        // Free topic slices (heap-allocated via page_allocator by the journal's LOG opcodes).
-        for (self.logs.items) |log| {
-            if (log.topics.len > 0) {
-                alloc_mod.get().free(@constCast(log.topics));
-            }
-        }
+        for (self.logs.items) |log| log.deinit(alloc_mod.get());
         self.logs.deinit(alloc_mod.get());
         // Free heap-allocated return data copy (len==0 means static empty slice, skip).
         if (self.return_data.len > 0) {

@@ -397,12 +397,7 @@ pub const JournalInner = struct {
     pub fn deinit(self: *JournalInner) void {
         self.evm_state.deinit();
         self.transient_storage.deinit();
-        // Free heap-allocated topic slices before freeing the log list
-        for (self.logs.items) |log| {
-            if (log.topics.len > 0) {
-                alloc_mod.get().free(@constCast(log.topics));
-            }
-        }
+        for (self.logs.items) |log| log.deinit(alloc_mod.get());
         self.logs.deinit(alloc_mod.get());
         self.journal.deinit(alloc_mod.get());
         self.warm_addresses.deinit();
@@ -441,12 +436,8 @@ pub const JournalInner = struct {
         self.journal.clearRetainingCapacity();
         self.warm_addresses.clearCoinbaseAndAccessList();
         self.transaction_id += 1;
-        // Free heap-allocated topic slices (in case takeLogs() was not called)
-        for (self.logs.items) |log| {
-            if (log.topics.len > 0) {
-                alloc_mod.get().free(@constCast(log.topics));
-            }
-        }
+        // Free heap-allocated data/topics (in case takeLogs() was not called — e.g. failed tx)
+        for (self.logs.items) |log| log.deinit(alloc_mod.get());
         self.logs.clearRetainingCapacity();
     }
 
@@ -463,12 +454,8 @@ pub const JournalInner = struct {
         }
 
         self.transient_storage.clearRetainingCapacity();
-        // Free heap-allocated topic slices before clearing the log list
-        for (self.logs.items) |log| {
-            if (log.topics.len > 0) {
-                alloc_mod.get().free(@constCast(log.topics));
-            }
-        }
+        // Free heap-allocated data/topics before clearing the log list
+        for (self.logs.items) |log| log.deinit(alloc_mod.get());
         self.logs.clearRetainingCapacity();
         self.transaction_id += 1;
         self.warm_addresses.clearCoinbaseAndAccessList();
@@ -483,12 +470,7 @@ pub const JournalInner = struct {
 
         const evm_state = self.evm_state;
         self.evm_state = state.EvmState.init(alloc_mod.get());
-        // Free heap-allocated topic slices before clearing the log list.
-        for (self.logs.items) |log| {
-            if (log.topics.len > 0) {
-                alloc_mod.get().free(@constCast(log.topics));
-            }
-        }
+        for (self.logs.items) |log| log.deinit(alloc_mod.get());
         self.logs.clearRetainingCapacity();
         self.transient_storage.clearRetainingCapacity();
         self.journal.clearRetainingCapacity();
@@ -722,6 +704,8 @@ pub const JournalInner = struct {
     /// Reverts all changes to evm_state until given checkpoint.
     pub fn checkpointRevert(self: *JournalInner, checkpoint: JournalCheckpoint) void {
         const is_spurious_dragon_enabled = primitives.isEnabledIn(self.spec, .spurious_dragon);
+        // Free heap-allocated data/topics of logs being discarded by this revert.
+        for (self.logs.items[checkpoint.log_i..]) |log| log.deinit(alloc_mod.get());
         self.logs.shrinkRetainingCapacity(checkpoint.log_i);
 
         // iterate over last N journals sets and revert our global evm_state

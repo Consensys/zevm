@@ -26,11 +26,22 @@ pub const StorageValue = U256;
 /// Type alias for byte arrays
 pub const Bytes = []u8;
 
-/// Log entry for EVM events
+/// Log entry for EVM events.
+///
+/// `data` and `topics` are heap-allocated (via the zevm_allocator) when non-empty,
+/// and must be freed with `deinit`. Zero-length slices use static empty literals and
+/// must NOT be freed.
 pub const Log = struct {
     address: Address,
     topics: []const Hash,
     data: []const u8,
+
+    /// Free heap-allocated data and topics. Safe to call on zero-length fields
+    /// because the LOG opcode uses static empty literals for those cases.
+    pub fn deinit(self: Log, alloc: std.mem.Allocator) void {
+        if (self.data.len > 0) alloc.free(@constCast(self.data));
+        if (self.topics.len > 0) alloc.free(@constCast(self.topics));
+    }
 };
 
 /// Optimize short address access.
