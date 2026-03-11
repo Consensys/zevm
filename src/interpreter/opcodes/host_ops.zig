@@ -523,6 +523,7 @@ pub fn makeLogFn(comptime n: u8) *const fn (ctx: *InstructionContext) void {
             const log_data: []const u8 = if (size_u > 0) blk: {
                 const src = ctx.interpreter.memory.buffer.items[offset_u..log_end];
                 const copy = alloc_mod.get().dupe(u8, src) catch {
+                    if (comptime n > 0) alloc_mod.get().free(topics);
                     ctx.interpreter.halt(.out_of_gas);
                     return;
                 };
