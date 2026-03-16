@@ -39,7 +39,7 @@ pub const CfgEnv = struct {
     /// If this config is not set, the blob base fee update fraction will be set to the default value.
     /// See also [CfgEnv::blob_base_fee_update_fraction].
     ///
-    /// Default values: Cancun/Prague (3338477), Osaka (5007716), BPO1 (8346193), BPO2 (11684671).
+    /// Default values: Cancun (3338477), Prague/Osaka (5007716), BPO1 (8346193), BPO2 (11684671).
     /// See [`CfgEnv::blobBaseFeeUpdateFraction`] for the resolution logic.
     blob_base_fee_update_fraction: ?u64,
     /// Configures the gas limit cap for the transaction.
@@ -343,17 +343,17 @@ pub const CfgEnv = struct {
     ///
     /// If this field is not set, the default is derived from the active spec:
     /// - BPO2+:   11684671 (`BLOB_BASE_FEE_UPDATE_FRACTION_BPO2`)
-    /// - BPO1+:    8346193 (`BLOB_BASE_FEE_UPDATE_FRACTION_BPO1`)
-    /// - Osaka+:   5007716 (`BLOB_BASE_FEE_UPDATE_FRACTION_OSAKA`, EIP-7691)
-    /// - Cancun+:  3338477 (`BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN`)
+    /// - BPO1:    8346193 (`BLOB_BASE_FEE_UPDATE_FRACTION_BPO1`)
+    /// - Prague+:   5007716 (`BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE`, EIP-7691)
+    /// - Cancun:  3338477 (`BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN`)
     pub fn blobBaseFeeUpdateFraction(self: CfgEnv) u64 {
         return self.blob_base_fee_update_fraction orelse
             if (self.spec.isEnabledIn(.bpo2))
                 primitives.BLOB_BASE_FEE_UPDATE_FRACTION_BPO2
             else if (self.spec.isEnabledIn(.bpo1))
                 primitives.BLOB_BASE_FEE_UPDATE_FRACTION_BPO1
-            else if (self.spec.isEnabledIn(.osaka))
-                primitives.BLOB_BASE_FEE_UPDATE_FRACTION_OSAKA
+            else if (self.spec.isEnabledIn(.prague))
+                primitives.BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE
             else
                 primitives.BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN;
     }

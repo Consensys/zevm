@@ -83,10 +83,8 @@ pub const CALL_STACK_LIMIT: u64 = 1024;
 
 /// Blob base fee update fraction for Cancun hardfork (EIP-4844)
 pub const BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN: u64 = 3338477;
-/// Blob base fee update fraction for Prague hardfork (alias for Cancun, pre-EIP-7691)
-pub const BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE: u64 = 3338477;
 /// Blob base fee update fraction for Prague/Osaka hardfork (EIP-7691)
-pub const BLOB_BASE_FEE_UPDATE_FRACTION_OSAKA: u64 = 5007716;
+pub const BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE: u64 = 5007716;
 /// Blob base fee update fraction for BPO1 hardfork (EIP-7892)
 pub const BLOB_BASE_FEE_UPDATE_FRACTION_BPO1: u64 = 8346193;
 /// Blob base fee update fraction for BPO2/Amsterdam/Glamsterdam hardfork
