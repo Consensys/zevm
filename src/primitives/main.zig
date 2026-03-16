@@ -81,10 +81,14 @@ pub const STACK_LIMIT: usize = 1024;
 /// EVM call stack limit
 pub const CALL_STACK_LIMIT: u64 = 1024;
 
-/// Blob base fee update fraction for Prague hardfork
-pub const BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE: u64 = 3338477;
-/// Blob base fee update fraction for Osaka hardfork (EIP-7691)
-pub const BLOB_BASE_FEE_UPDATE_FRACTION_OSAKA: u64 = 5007716;
+/// Blob base fee update fraction for Cancun hardfork (EIP-4844)
+pub const BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN: u64 = 3338477;
+/// Blob base fee update fraction for Prague/Osaka hardfork (EIP-7691)
+pub const BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE: u64 = 5007716;
+/// Blob base fee update fraction for BPO1 hardfork (EIP-7892)
+pub const BLOB_BASE_FEE_UPDATE_FRACTION_BPO1: u64 = 8346193;
+/// Blob base fee update fraction for BPO2/Amsterdam/Glamsterdam hardfork
+pub const BLOB_BASE_FEE_UPDATE_FRACTION_BPO2: u64 = 11684671;
 /// EIP-7918: blob base cost (2**13) used for reserve price calculation
 pub const BLOB_BASE_COST: u64 = 8192;
 
@@ -93,8 +97,12 @@ pub const GAS_PER_BLOB: u64 = 131_072;
 
 /// EIP-4844: maximum blobs per block (Cancun: 6, Prague+: 9 via EIP-7691)
 pub const MAX_BLOB_NUMBER_PER_BLOCK: usize = 6;
-/// EIP-7691: maximum blobs per block for Prague (9)
+/// EIP-7691: maximum blobs per block for Prague/Osaka (9)
 pub const MAX_BLOB_NUMBER_PER_BLOCK_PRAGUE: usize = 9;
+/// EIP-7892: maximum blobs per block for BPO1 (15)
+pub const MAX_BLOB_NUMBER_PER_BLOCK_BPO1: usize = 15;
+/// Maximum blobs per block for BPO2/Amsterdam/Glamsterdam (21)
+pub const MAX_BLOB_NUMBER_PER_BLOCK_BPO2: usize = 21;
 /// EIP-7594: maximum blobs per transaction for Osaka (6)
 pub const MAX_BLOB_NUMBER_PER_TX: usize = 6;
 
@@ -155,6 +163,10 @@ pub const SpecId = enum(u8) {
     prague,
     /// Osaka hard fork - Activated at block TBD
     osaka,
+    /// BPO1 hard fork - Blob Parameter Only fork 1 (EIP-7892)
+    bpo1,
+    /// BPO2 hard fork - Blob Parameter Only fork 2
+    bpo2,
     /// Amsterdam hard fork - Activated at block TBD
     amsterdam,
 };
@@ -191,6 +203,8 @@ pub const HardforkName = struct {
     pub const CANCUN = "Cancun";
     pub const PRAGUE = "Prague";
     pub const OSAKA = "Osaka";
+    pub const BPO1 = "BPO1";
+    pub const BPO2 = "BPO2";
     pub const AMSTERDAM = "Amsterdam";
     pub const LATEST = "Latest";
 };
@@ -220,6 +234,8 @@ pub fn specIdFromString(s: []const u8) UnknownHardfork!SpecId {
     if (std.mem.eql(u8, s, HardforkName.CANCUN)) return .cancun;
     if (std.mem.eql(u8, s, HardforkName.PRAGUE)) return .prague;
     if (std.mem.eql(u8, s, HardforkName.OSAKA)) return .osaka;
+    if (std.mem.eql(u8, s, HardforkName.BPO1)) return .bpo1;
+    if (std.mem.eql(u8, s, HardforkName.BPO2)) return .bpo2;
     if (std.mem.eql(u8, s, HardforkName.AMSTERDAM)) return .amsterdam;
     return UnknownHardfork.UnknownHardfork;
 }
@@ -247,6 +263,8 @@ pub fn specIdToString(spec_id: SpecId) []const u8 {
         .cancun => HardforkName.CANCUN,
         .prague => HardforkName.PRAGUE,
         .osaka => HardforkName.OSAKA,
+        .bpo1 => HardforkName.BPO1,
+        .bpo2 => HardforkName.BPO2,
         .amsterdam => HardforkName.AMSTERDAM,
     };
 }

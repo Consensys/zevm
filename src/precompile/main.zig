@@ -180,7 +180,7 @@ pub const PrecompileSpecId = enum {
             .berlin, .london, .arrow_glacier, .gray_glacier, .merge, .shanghai => .Berlin,
             .cancun => .Cancun,
             .prague => .Prague,
-            .osaka, .amsterdam => .Osaka,
+            .osaka, .bpo1, .bpo2, .amsterdam => .Osaka,
         };
     }
 };
