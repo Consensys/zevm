@@ -132,6 +132,8 @@ pub const CreateInputs = struct {
     scheme: CreateScheme,
     /// Salt for CREATE2
     salt: ?primitives.Hash,
+    /// EIP-8037 (Amsterdam+): state gas reservoir forwarded from parent to child.
+    reservoir: u64,
 };
 
 /// Create outcome

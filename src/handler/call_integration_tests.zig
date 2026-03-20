@@ -118,6 +118,7 @@ test "SSTORE EIP-2200: fails when gas_remaining <= 2300 (Istanbul+)" {
         .gas_limit = 2300,
         .scheme = .call,
         .is_static = false,
+        .reservoir = 0,
     });
     try std.testing.expect(!result.success);
 }
@@ -149,6 +150,7 @@ test "SSTORE EIP-2200: succeeds with sufficient gas" {
         .gas_limit = 50_000,
         .scheme = .call,
         .is_static = false,
+        .reservoir = 0,
     });
     try std.testing.expect(result.success);
 }
@@ -188,6 +190,7 @@ test "gas refund propagation: SSTORE clear in sub-call surfaces in CallResult" {
         .gas_limit = 100_000,
         .scheme = .call,
         .is_static = false,
+        .reservoir = 0,
     });
 
     try std.testing.expect(result.success);

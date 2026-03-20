@@ -40,6 +40,9 @@ pub const opPush0 = stack.opPush0;
 pub const makePushFn = stack.makePushFn;
 pub const makeDupFn = stack.makeDupFn;
 pub const makeSwapFn = stack.makeSwapFn;
+pub const opDupN = stack.opDupN;
+pub const opSwapN = stack.opSwapN;
+pub const opExchange = stack.opExchange;
 
 // Control flow operations
 pub const control = @import("control.zig");
@@ -85,6 +88,7 @@ pub const opChainid = environment.opChainid;
 pub const opBasefee = environment.opBasefee;
 pub const opBlobhash = environment.opBlobhash;
 pub const opBlobbasefee = environment.opBlobbasefee;
+pub const opSlotnum = environment.opSlotnum;
 
 // Host-requiring opcodes (account state, storage, logs, selfdestruct)
 pub const host_ops = @import("host_ops.zig");
