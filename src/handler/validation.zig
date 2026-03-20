@@ -16,7 +16,8 @@ const TX_EIP7702_AUTH_COST: u64 = 25000;
 // EIP-7623: token costs (different from calldata gas costs)
 const FLOOR_ZERO_TOKEN_COST: u64 = 1;
 const FLOOR_NONZERO_TOKEN_COST: u64 = 4;
-// EIP-3860: max initcode size = 2 * MAX_CODE_SIZE
+// EIP-3860: max initcode size = 2 * MAX_CODE_SIZE (pre-Amsterdam)
+// EIP-7954 (Amsterdam+): doubled to 2 * 32768 = 65536
 const MAX_INITCODE_SIZE: usize = 49152;
 
 /// Validation utilities
@@ -95,10 +96,12 @@ pub const Validation = struct {
         const spec = ctx.cfg.spec;
 
         // EIP-3860 (Shanghai+): initcode size limit for CREATE transactions
+        // EIP-7954 (Amsterdam+): limit doubled to 65536
         if (primitives.isEnabledIn(spec, .shanghai)) {
             if (tx.kind == .Create) {
                 const calldata_len = if (tx.data) |d| d.items.len else 0;
-                if (calldata_len > MAX_INITCODE_SIZE) {
+                const max_initcode: usize = if (primitives.isEnabledIn(spec, .amsterdam)) 65536 else MAX_INITCODE_SIZE;
+                if (calldata_len > max_initcode) {
                     return ValidationError.CreateInitcodeOverLimit;
                 }
             }
