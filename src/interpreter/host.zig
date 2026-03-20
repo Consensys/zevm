@@ -307,6 +307,12 @@ pub const Host = struct {
                         self.ctx.journaled_state.checkpointRevert(cp);
                         return .{ .precompile = CallResult.preExecFailure(inputs.gas_limit) };
                     }
+                    // EIP-7708 (Amsterdam+): emit Transfer log for ETH sent to precompile.
+                    if (primitives.isEnabledIn(self.ctx.cfg.spec, .amsterdam) and
+                        !std.mem.eql(u8, &inputs.caller, &inputs.target))
+                    {
+                        self.ctx.journaled_state.emitTransferLog(inputs.caller, inputs.target, inputs.value);
+                    }
                 }
                 const pc_result = pc.execute(inputs.data, inputs.gas_limit);
                 switch (pc_result) {
@@ -363,6 +369,12 @@ pub const Host = struct {
             if (transfer_err != null) {
                 self.ctx.journaled_state.checkpointRevert(checkpoint);
                 return .{ .failed = CallResult.preExecFailure(inputs.gas_limit) };
+            }
+            // EIP-7708 (Amsterdam+): emit Transfer log for ETH sent via CALL.
+            if (primitives.isEnabledIn(self.ctx.cfg.spec, .amsterdam) and
+                !std.mem.eql(u8, &inputs.caller, &inputs.target))
+            {
+                self.ctx.journaled_state.emitTransferLog(inputs.caller, inputs.target, inputs.value);
             }
         }
 
@@ -469,8 +481,13 @@ pub const Host = struct {
         }
 
         const checkpoint = js.createAccountCheckpoint(caller, new_addr, value, spec_id) catch {
-            return .{ .failed = CreateResult.preExecFailure(0) };
+            return .{ .failed = CreateResult.failure() };
         };
+
+        // EIP-7708 (Amsterdam+): emit Transfer log for ETH sent to the new contract.
+        if (value > 0 and primitives.isEnabledIn(spec_id, .amsterdam)) {
+            js.emitTransferLog(caller, new_addr, value);
+        }
 
         return .{ .ready = .{ .checkpoint = checkpoint, .new_addr = new_addr } };
     }
