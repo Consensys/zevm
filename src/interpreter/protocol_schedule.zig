@@ -49,6 +49,7 @@ pub fn makeInstructionTable(spec: primitives.SpecId) InstructionTable {
     if (primitives.isEnabledIn(spec, .shanghai)) applyShanghaiChanges(&table);
     if (primitives.isEnabledIn(spec, .cancun)) applyCancunChanges(&table);
     if (primitives.isEnabledIn(spec, .osaka)) applyOsakaChanges(&table);
+    if (primitives.isEnabledIn(spec, .amsterdam)) applyAmsterdamChanges(&table);
 
     return table;
 }
@@ -252,6 +253,15 @@ fn applyCancunChanges(table: *InstructionTable) void {
 fn applyOsakaChanges(table: *InstructionTable) void {
     // EIP-7939: CLZ (Count Leading Zeros), gas cost = G_LOW (5)
     table[bytecode_mod.CLZ] = entry(opcodes.opClz, gas_costs.G_LOW);
+}
+
+fn applyAmsterdamChanges(table: *InstructionTable) void {
+    // EIP-7843: SLOTNUM opcode — push beacon chain slot number
+    table[bytecode_mod.SLOTNUM] = entry(opcodes.opSlotnum, gas_costs.G_BASE);
+    // EIP-8024: DUPN/SWAPN/EXCHANGE — generalized stack manipulation with 1-byte immediate
+    table[bytecode_mod.DUPN] = entry(opcodes.opDupN, gas_costs.G_VERYLOW);
+    table[bytecode_mod.SWAPN] = entry(opcodes.opSwapN, gas_costs.G_VERYLOW);
+    table[bytecode_mod.EXCHANGE] = entry(opcodes.opExchange, gas_costs.G_VERYLOW);
 }
 
 // ---------------------------------------------------------------------------

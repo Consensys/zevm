@@ -259,6 +259,7 @@ pub fn runTestCase(tc: types.TestCase, allocator: std.mem.Allocator) TestOutcome
         .difficulty = u256FromBeBytes(tc.block_difficulty),
         .prevrandao = tc.prevrandao,
         .blob_excess_gas_and_price = blob_excess_gas_and_price,
+        .slot_number = 0,
     });
 
     // Build access list for TxEnv
@@ -400,7 +401,7 @@ pub fn runTestCase(tc: types.TestCase, allocator: std.mem.Allocator) TestOutcome
     // ---------------------------------------------------------------------------
     // Execute frame
     // ---------------------------------------------------------------------------
-    var frame_result = MainnetHandler.executeFrame(&evm, initial_gas.initial_gas) catch {
+    var frame_result = MainnetHandler.executeFrame(&evm, initial_gas) catch {
         if (tc.expect_exception) {
             return .{ .result = .pass, .detail = .{ .reason = "expected exception: execution error" } };
         }

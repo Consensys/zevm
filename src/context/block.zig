@@ -29,6 +29,8 @@ pub const BlockEnv = struct {
     ///
     /// Incorporated as part of the Cancun upgrade via EIP-4844.
     blob_excess_gas_and_price: ?BlobExcessGasAndPrice,
+    /// Beacon chain slot number (EIP-7843, Amsterdam+).
+    slot_number: u64,
 
     pub fn default() BlockEnv {
         return .{
@@ -40,6 +42,7 @@ pub const BlockEnv = struct {
             .difficulty = @as(primitives.U256, 0),
             .prevrandao = null,
             .blob_excess_gas_and_price = BlobExcessGasAndPrice.new(0, primitives.BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE),
+            .slot_number = 0,
         };
     }
 
@@ -143,6 +146,7 @@ pub const BlockEnvBuilder = struct {
     difficulty: ?primitives.U256,
     prevrandao: ?primitives.Hash,
     blob_excess_gas_and_price: ?BlobExcessGasAndPrice,
+    slot_number: ?u64,
 
     pub fn new() BlockEnvBuilder {
         return .{
@@ -154,6 +158,7 @@ pub const BlockEnvBuilder = struct {
             .difficulty = null,
             .prevrandao = null,
             .blob_excess_gas_and_price = null,
+            .slot_number = null,
         };
     }
 
@@ -271,6 +276,7 @@ pub const BlockEnvBuilder = struct {
             .difficulty = self.difficulty orelse @as(primitives.U256, 0),
             .prevrandao = self.prevrandao,
             .blob_excess_gas_and_price = self.blob_excess_gas_and_price orelse BlobExcessGasAndPrice.new(0, primitives.BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE),
+            .slot_number = self.slot_number orelse 0,
         };
     }
 };

@@ -225,6 +225,7 @@ pub const SELFBALANCE: u8 = 0x47;
 pub const BASEFEE: u8 = 0x48;
 pub const BLOBHASH: u8 = 0x49;
 pub const BLOBBASEFEE: u8 = 0x4A;
+pub const SLOTNUM: u8 = 0x4B;
 pub const POP: u8 = 0x50;
 pub const MLOAD: u8 = 0x51;
 pub const MSTORE: u8 = 0x52;
@@ -310,6 +311,9 @@ pub const LOG1: u8 = 0xA1;
 pub const LOG2: u8 = 0xA2;
 pub const LOG3: u8 = 0xA3;
 pub const LOG4: u8 = 0xA4;
+pub const DUPN: u8 = 0xE6;
+pub const SWAPN: u8 = 0xE7;
+pub const EXCHANGE: u8 = 0xE8;
 pub const CREATE: u8 = 0xF0;
 pub const CALL: u8 = 0xF1;
 pub const CALLCODE: u8 = 0xF2;
@@ -387,6 +391,7 @@ pub const OPCODE_INFO: [256]?OpCodeInfo = blk: {
     map[BASEFEE] = OpCodeInfo{ .name = "BASEFEE", .inputs = 0, .outputs = 1, .immediate_size = 0, .terminating = false };
     map[BLOBHASH] = OpCodeInfo{ .name = "BLOBHASH", .inputs = 1, .outputs = 1, .immediate_size = 0, .terminating = false };
     map[BLOBBASEFEE] = OpCodeInfo{ .name = "BLOBBASEFEE", .inputs = 0, .outputs = 1, .immediate_size = 0, .terminating = false };
+    map[SLOTNUM] = OpCodeInfo{ .name = "SLOTNUM", .inputs = 0, .outputs = 1, .immediate_size = 0, .terminating = false };
 
     // Stack operations
     map[POP] = OpCodeInfo{ .name = "POP", .inputs = 1, .outputs = 0, .immediate_size = 0, .terminating = false };
@@ -487,6 +492,9 @@ pub const OPCODE_INFO: [256]?OpCodeInfo = blk: {
     map[CREATE] = OpCodeInfo{ .name = "CREATE", .inputs = 3, .outputs = 1, .immediate_size = 0, .terminating = false };
     map[CALL] = OpCodeInfo{ .name = "CALL", .inputs = 7, .outputs = 1, .immediate_size = 0, .terminating = false };
     map[CALLCODE] = OpCodeInfo{ .name = "CALLCODE", .inputs = 7, .outputs = 1, .immediate_size = 0, .terminating = false };
+    map[DUPN] = OpCodeInfo{ .name = "DUPN", .inputs = 0, .outputs = 1, .immediate_size = 1, .terminating = false };
+    map[SWAPN] = OpCodeInfo{ .name = "SWAPN", .inputs = 0, .outputs = 0, .immediate_size = 1, .terminating = false };
+    map[EXCHANGE] = OpCodeInfo{ .name = "EXCHANGE", .inputs = 0, .outputs = 0, .immediate_size = 1, .terminating = false };
     map[RETURN] = OpCodeInfo{ .name = "RETURN", .inputs = 2, .outputs = 0, .immediate_size = 0, .terminating = true };
     map[DELEGATECALL] = OpCodeInfo{ .name = "DELEGATECALL", .inputs = 6, .outputs = 1, .immediate_size = 0, .terminating = false };
     map[CREATE2] = OpCodeInfo{ .name = "CREATE2", .inputs = 4, .outputs = 1, .immediate_size = 0, .terminating = false };

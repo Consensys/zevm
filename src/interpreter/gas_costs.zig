@@ -39,6 +39,32 @@ pub const SSTORE_CLEARS_SCHEDULE = 15000; // Istanbul refund for clearing storag
 // EIP-3529 (London): R_sclear reduced from 15000 → 4800 = SSTORE_RESET_GAS + ACCESS_LIST_STORAGE_KEY_COST (2900+1900)
 pub const SSTORE_CLEARS_SCHEDULE_LONDON = 4800;
 
+// EIP-8037 (Amsterdam): State creation gas constants
+// GAS_STORAGE_UPDATE replaces SSTORE_SET for 0→nonzero writes (regular portion only)
+pub const GAS_STORAGE_UPDATE: u64 = 5000;
+// State bytes charged per operation (used with cost_per_state_byte)
+pub const STATE_BYTES_PER_STORAGE_SET: u64 = 32;
+pub const STATE_BYTES_PER_NEW_ACCOUNT: u64 = 112;
+pub const STATE_BYTES_PER_AUTH_BASE: u64 = 23;
+// EIP-8037 CPSB (cost_per_state_byte) formula constants
+pub const CPSB_BLOCKS_PER_YEAR: u64 = 2_628_000;
+pub const CPSB_TARGET_STATE_GROWTH: u64 = 100 * 1024 * 1024 * 1024; // 100 GiB
+pub const CPSB_SIGNIFICANT_BITS: u6 = 5;
+pub const CPSB_OFFSET: u64 = 9578;
+// EIP-7825: TX gas limit boundary for state gas reservoir split
+pub const TX_MAX_GAS_LIMIT: u64 = 1 << 24; // 16,777,216
+// EIP-8037: minimum effective block gas limit for CPSB computation.
+// Ensures cost_per_state_byte >= 1174 (the quantized value at ~96M+ block gas limit).
+pub const CPSB_FLOOR_GAS_LIMIT: u64 = 100_000_000;
+
+/// EIP-8037: Compute cost_per_state_byte at a given block gas limit.
+/// devnet-3: hardcoded to 1174 (aligns with 100M block gas limit).
+/// devnet-4 will use the full formula where cpsb depends on block gas limit.
+pub fn costPerStateByte(block_gas_limit: u64) u64 {
+    _ = block_gas_limit;
+    return 1174;
+}
+
 // Create costs
 pub const G_CREATE = 32000;
 pub const G_CODEDEPOSIT = 200; // Per byte of deployed code
@@ -116,6 +142,8 @@ pub fn getSloadCost(spec: primitives.SpecId, is_cold: bool) u64 {
 pub const SstoreGas = struct {
     gas_cost: u64,
     gas_refund: i64,
+    /// EIP-8037 (Amsterdam+): state gas to charge via spendStateGas. 0 for pre-Amsterdam.
+    state_gas: u64 = 0,
 };
 
 /// Returns the fork-appropriate SSTORE clearing refund (R_sclear):
@@ -127,13 +155,14 @@ fn sstoreClearsRefund(spec: primitives.SpecId) i64 {
     return SSTORE_CLEARS_SCHEDULE;
 }
 
-// Calculate SSTORE gas cost based on EIP-2200 and EIP-2929
+// Calculate SSTORE gas cost based on EIP-2200, EIP-2929, and EIP-8037
 pub fn getSstoreCost(
     spec: primitives.SpecId,
     original: primitives.U256,
     current: primitives.U256,
     new: primitives.U256,
     is_cold: bool,
+    block_gas_limit: u64,
 ) SstoreGas {
     // Pre-Istanbul: simple gas model based only on current and new values.
     // EIP-2200 "original" tracking did not exist before Istanbul.
@@ -170,7 +199,14 @@ pub fn getSstoreCost(
     if (original == current) {
         // First time modification in transaction
         if (original == 0) {
-            // Setting from zero
+            // Setting from zero: creates new state
+            if (primitives.isEnabledIn(spec, .amsterdam)) {
+                // EIP-8037: regular gas = GAS_STORAGE_UPDATE (replaces SSTORE_SET),
+                // state gas = STATE_BYTES_PER_STORAGE_SET * cost_per_state_byte
+                const cpsb = costPerStateByte(block_gas_limit);
+                const state_gas = STATE_BYTES_PER_STORAGE_SET * cpsb;
+                return .{ .gas_cost = sstore_reset_cost + cold_cost, .gas_refund = 0, .state_gas = state_gas };
+            }
             return .{ .gas_cost = SSTORE_SET + cold_cost, .gas_refund = 0 };
         } else {
             // Modifying non-zero value
@@ -206,7 +242,19 @@ pub fn getSstoreCost(
         // Restoring original value: refund net cost of the initial modification
         // (making the effective cost of this SSTORE = dirty_base, i.e. one SLOAD).
         if (original == 0) {
-            refund += @as(i64, @intCast(SSTORE_SET)) - @as(i64, @intCast(dirty_base));
+            if (primitives.isEnabledIn(spec, .amsterdam)) {
+                // EIP-8037: refund = state_gas + GAS_STORAGE_UPDATE - COLD_SLOAD - WARM_SLOAD
+                // = 37568 + 5000 - 2100 - 100 = 40368 (at 120M block gas limit)
+                const cpsb = costPerStateByte(block_gas_limit);
+                const state_gas: u64 = STATE_BYTES_PER_STORAGE_SET * cpsb;
+                const amsterdam_refund = @as(i64, @intCast(state_gas)) +
+                    @as(i64, @intCast(GAS_STORAGE_UPDATE)) -
+                    @as(i64, @intCast(COLD_SLOAD)) -
+                    @as(i64, @intCast(WARM_SLOAD));
+                refund += amsterdam_refund;
+            } else {
+                refund += @as(i64, @intCast(SSTORE_SET)) - @as(i64, @intCast(dirty_base));
+            }
         } else {
             refund += @as(i64, @intCast(sstore_reset_cost)) - @as(i64, @intCast(dirty_base));
         }
@@ -236,8 +284,10 @@ pub fn getCallGasCost(
     // Value transfer cost (G_CALLVALUE = 9000, unchanged across all forks)
     if (transfers_value) {
         cost += 9000;
-        // New account creation cost (G_NEWACCOUNT = 25000)
-        if (!account_exists) {
+        // New account creation cost (G_NEWACCOUNT = 25000).
+        // EIP-8037 (Amsterdam+): G_NEWACCOUNT regular cost removed; state gas charged separately
+        // in opCall via spendStateGas(STATE_BYTES_PER_NEW_ACCOUNT * cost_per_state_byte).
+        if (!account_exists and !primitives.isEnabledIn(spec, .amsterdam)) {
             cost += 25000;
         }
     } else if (!primitives.isEnabledIn(spec, .spurious_dragon) and !account_exists) {

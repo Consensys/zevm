@@ -512,3 +512,18 @@ pub fn opBlobbasefee(ctx: *InstructionContext) void {
     }
     stack.pushUnsafe(@as(primitives.U256, h.blobBasefee()));
 }
+
+/// SLOTNUM (0x4B): Push the beacon chain slot number (EIP-7843, Amsterdam+).
+/// Stack: [] -> [slotNumber]   Gas: 2 (G_BASE, dispatch)
+pub fn opSlotnum(ctx: *InstructionContext) void {
+    const h = ctx.host orelse {
+        ctx.interpreter.halt(.invalid_opcode);
+        return;
+    };
+    const stack = &ctx.interpreter.stack;
+    if (!stack.hasSpace(1)) {
+        ctx.interpreter.halt(.stack_overflow);
+        return;
+    }
+    stack.pushUnsafe(@as(primitives.U256, h.slotNumber()));
+}

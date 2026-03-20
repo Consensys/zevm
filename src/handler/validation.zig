@@ -3,16 +3,21 @@ const primitives = @import("primitives");
 const context = @import("context");
 const state = @import("state");
 const main = @import("main.zig");
+const interpreter_mod = @import("interpreter");
 
 // Gas constants for intrinsic gas calculation
 const TX_BASE_COST: u64 = 21000;
 const TX_CREATE_COST: u64 = 32000;
+// EIP-8037 (Amsterdam+): reduced regular CREATE cost
+const TX_CREATE_COST_AMSTERDAM: u64 = 9000;
 const CALLDATA_ZERO_BYTE_COST: u64 = 4;
 const CALLDATA_NONZERO_BYTE_COST: u64 = 16;
 const ACCESS_LIST_ADDRESS_COST: u64 = 2400;
 const ACCESS_LIST_STORAGE_KEY_COST: u64 = 1900;
 // EIP-7702: per-authorization intrinsic gas (PER_EMPTY_ACCOUNT_COST per EIP-7702 spec)
 const TX_EIP7702_AUTH_COST: u64 = 25000;
+// EIP-8037 (Amsterdam+): reduced regular per-auth cost
+const TX_EIP7702_AUTH_COST_AMSTERDAM: u64 = 7500;
 // EIP-7623: token costs (different from calldata gas costs)
 const FLOOR_ZERO_TOKEN_COST: u64 = 1;
 const FLOOR_NONZERO_TOKEN_COST: u64 = 4;
@@ -94,18 +99,20 @@ pub const Validation = struct {
         const tx = &ctx.tx;
         const spec = ctx.cfg.spec;
 
-        // EIP-3860 (Shanghai+): initcode size limit for CREATE transactions
+        // EIP-3860 (Shanghai+): initcode size limit for CREATE transactions.
+        // EIP-7954 (Amsterdam+): max code size doubles to 32768, so max initcode = 65536.
         if (primitives.isEnabledIn(spec, .shanghai)) {
             if (tx.kind == .Create) {
+                const max_initcode: usize = if (primitives.isEnabledIn(spec, .amsterdam)) 65536 else MAX_INITCODE_SIZE;
                 const calldata_len = if (tx.data) |d| d.items.len else 0;
-                if (calldata_len > MAX_INITCODE_SIZE) {
+                if (calldata_len > max_initcode) {
                     return ValidationError.CreateInitcodeOverLimit;
                 }
             }
         }
 
         // Calculate initial gas cost
-        const initial_gas = calculateInitialGas(tx, spec);
+        const initial_gas = calculateInitialGas(tx, spec, ctx.block.gas_limit);
 
         // Calculate floor gas exec-portion (EIP-7623: tokens * 10, only calldata tokens).
         // Returns 0 if EIP-7623 is disabled via cfg flag.
@@ -125,9 +132,26 @@ pub const Validation = struct {
             }
         }
 
+        // EIP-8037 (Amsterdam+): compute the state gas portion of the intrinsic cost.
+        // This is needed to compute gasUsed = max(regular_gas, state_gas) for receipts.
+        var initial_state_gas: u64 = 0;
+        if (primitives.isEnabledIn(spec, .amsterdam)) {
+            const gas_costs = interpreter_mod.gas_costs;
+            const cpsb = gas_costs.costPerStateByte(ctx.block.gas_limit);
+            if (tx.kind == .Create) {
+                initial_state_gas += gas_costs.STATE_BYTES_PER_NEW_ACCOUNT * cpsb;
+            }
+            // EIP-7702: auth list state gas — 135*cpsb per auth (base 23 + new-account 112)
+            if (tx.authorization_list) |auth_list| {
+                const num_auths: u64 = @intCast(auth_list.items.len);
+                initial_state_gas += num_auths * ((gas_costs.STATE_BYTES_PER_AUTH_BASE + gas_costs.STATE_BYTES_PER_NEW_ACCOUNT) * cpsb);
+            }
+        }
+
         return InitialAndFloorGas{
             .initial_gas = initial_gas,
             .floor_gas = floor_gas,
+            .initial_state_gas = initial_state_gas,
         };
     }
 
@@ -258,18 +282,28 @@ pub const Validation = struct {
     ///
     /// Breakdown:
     ///   21,000 base (always)
-    /// + 32,000 for CREATE transactions
+    /// + 32,000 for CREATE transactions (pre-Amsterdam) or 9,000 + 112*cpsb (Amsterdam+)
     /// + 4 per zero calldata byte, 16 per non-zero calldata byte
     /// + 2,400 per access-list address, 1,900 per access-list storage slot
-    /// + 25,000 per EIP-7702 authorization list entry (PER_EMPTY_ACCOUNT_COST, Prague+)
+    /// + 25,000 per EIP-7702 authorization list entry (pre-Amsterdam) or 7,500 + 135*cpsb (Amsterdam+)
     /// + GAS_PER_BLOB per EIP-4844 blob hash
-    pub fn calculateInitialGas(tx: *const context.TxEnv, spec: primitives.SpecId) u64 {
+    pub fn calculateInitialGas(tx: *const context.TxEnv, spec: primitives.SpecId, block_gas_limit: u64) u64 {
+        const gas_costs = interpreter_mod.gas_costs;
+        const cpsb: u64 = if (primitives.isEnabledIn(spec, .amsterdam))
+            gas_costs.costPerStateByte(block_gas_limit)
+        else
+            0;
         var gas: u64 = TX_BASE_COST;
 
         // CREATE adds extra base cost (EIP-2, Homestead+).
-        // Frontier does NOT charge G_TXCREATE (32000) for CREATE transactions.
+        // Frontier does NOT charge G_TXCREATE for CREATE transactions.
+        // EIP-8037 (Amsterdam+): regular CREATE cost drops to 9000; state gas (112*cpsb) added.
         if (tx.kind == .Create and primitives.isEnabledIn(spec, .homestead)) {
-            gas += TX_CREATE_COST;
+            if (primitives.isEnabledIn(spec, .amsterdam)) {
+                gas += TX_CREATE_COST_AMSTERDAM + gas_costs.STATE_BYTES_PER_NEW_ACCOUNT * cpsb;
+            } else {
+                gas += TX_CREATE_COST;
+            }
         }
 
         // Calldata costs:
@@ -310,9 +344,16 @@ pub const Validation = struct {
         // Blob fees are deducted in validateAgainstStateAndDeductCaller.
 
         // EIP-7702: authorization list intrinsic gas (Prague+)
+        // EIP-8037 (Amsterdam+): per-auth cost = 7500 regular + 135*cpsb state (= 23+112 state bytes)
         if (primitives.isEnabledIn(spec, .prague)) {
             if (tx.authorization_list) |auth_list| {
-                gas += @as(u64, auth_list.items.len) * TX_EIP7702_AUTH_COST;
+                const num_auths: u64 = @intCast(auth_list.items.len);
+                if (primitives.isEnabledIn(spec, .amsterdam)) {
+                    const per_auth = TX_EIP7702_AUTH_COST_AMSTERDAM + (gas_costs.STATE_BYTES_PER_AUTH_BASE + gas_costs.STATE_BYTES_PER_NEW_ACCOUNT) * cpsb;
+                    gas += num_auths * per_auth;
+                } else {
+                    gas += num_auths * TX_EIP7702_AUTH_COST;
+                }
             }
         }
 
@@ -425,6 +466,13 @@ pub const InitialAndFloorGas = struct {
     /// 25,000 (PER_EMPTY_ACCOUNT_COST) added for each valid authorization that sets code.
     /// Applied in postExecution with the standard 1/5 cap against total gas used.
     auth_refund: i64 = 0,
+    /// EIP-8037 (Amsterdam+): state gas portion of the intrinsic cost.
+    /// For CREATE: STATE_BYTES_PER_NEW_ACCOUNT * CPSB.
+    /// For EIP-7702 auth entries: (STATE_BYTES_PER_AUTH_BASE + STATE_BYTES_PER_NEW_ACCOUNT) * CPSB per auth.
+    initial_state_gas: u64 = 0,
+    /// EIP-8037 (Amsterdam+): state gas refunded for valid auths to existing accounts.
+    /// 112*cpsb per valid auth applied to an existing (non-empty) account. Bypasses 1/5 cap.
+    auth_state_refund: u64 = 0,
 };
 
 /// Validation errors
