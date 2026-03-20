@@ -164,6 +164,10 @@ pub const MainnetHandler = struct {
         // For each recovered authorization, validate and apply code delegation.
         if (primitives.isEnabledIn(spec, .prague)) {
             if (tx.authorization_list) |auth_list| {
+                const amsterdam_cpsb: u64 = if (primitives.isEnabledIn(spec, .amsterdam))
+                    interpreter_mod.gas_costs.costPerStateByte(ctx.block.gas_limit)
+                else
+                    0;
                 for (auth_list.items) |auth_entry| {
                     switch (auth_entry) {
                         .Right => |recovered| {
@@ -209,13 +213,19 @@ pub const MainnetHandler = struct {
                                     // EIP-7702 refund: the intrinsic cost charges PER_EMPTY_ACCOUNT_COST
                                     // (25,000) for each authorization to cover possible new-account creation.
                                     // If the authority already exists (non-empty), no new account is created,
-                                    // so refund PER_EMPTY_ACCOUNT_COST / 2 = 12,500.
+                                    // so refund PER_EMPTY_ACCOUNT_COST / 2 = 12,500 (Prague).
+                                    // EIP-8037 (Amsterdam+): refund 112*cpsb state gas per existing auth
+                                    // (bypasses 1/5 cap — it's a pre-payment correction, not an SSTORE reward).
                                     // An account is non-empty if: nonce > 0, balance > 0, or code != empty.
                                     const is_existing = journaled.account.info.nonce > 0 or
                                         journaled.account.info.balance > 0 or
                                         !std.mem.eql(u8, &journaled.account.info.code_hash, &primitives.KECCAK_EMPTY);
                                     if (is_existing) {
-                                        initial_gas.auth_refund += 12500;
+                                        if (primitives.isEnabledIn(spec, .amsterdam)) {
+                                            initial_gas.auth_state_refund += interpreter_mod.gas_costs.STATE_BYTES_PER_NEW_ACCOUNT * amsterdam_cpsb;
+                                        } else {
+                                            initial_gas.auth_refund += 12500;
+                                        }
                                     }
 
                                     // Bump authority nonce (journaled, revertable).
@@ -237,14 +247,28 @@ pub const MainnetHandler = struct {
     }
 
     /// Execute the transaction frame — runs the interpreter against bytecode.
-    pub fn executeFrame(evm: *main.Evm, initial_gas: u64) !main.FrameResult {
+    pub fn executeFrame(evm: *main.Evm, initial: validation.InitialAndFloorGas) !main.FrameResult {
         const ctx = evm.getContext();
         const tx = &ctx.tx;
         const spec = ctx.cfg.spec;
+        const initial_gas = initial.initial_gas;
 
         const calldata: []const u8 = if (tx.data) |data| data.items else &[_]u8{};
         // Gas available to execution = gas_limit minus intrinsic cost
         const exec_gas = tx.gas_limit - initial_gas;
+
+        // EIP-8037 (Amsterdam+): split exec_gas into regular and state reservoir.
+        // regular_gas_budget = TX_MAX_GAS_LIMIT - intrinsic_regular (regular portion only).
+        // Any excess exec_gas above regular_gas_budget goes to the state gas reservoir.
+        const tx_regular_exec_gas: u64 = if (primitives.isEnabledIn(spec, .amsterdam)) blk: {
+            const initial_regular = initial_gas - initial.initial_state_gas;
+            const regular_budget = interpreter_mod.gas_costs.TX_MAX_GAS_LIMIT -| initial_regular;
+            break :blk @min(regular_budget, exec_gas);
+        } else exec_gas;
+        const tx_reservoir: u64 = if (primitives.isEnabledIn(spec, .amsterdam))
+            exec_gas - tx_regular_exec_gas
+        else
+            0;
 
         var host = interpreter_mod.Host{
             .ctx = ctx,
@@ -257,7 +281,8 @@ pub const MainnetHandler = struct {
         switch (tx.kind) {
             .Create => {
                 // Top-level CREATE: tx validation already bumped caller nonce (skip_nonce_bump=true).
-                const setup = host.setupCreate(tx.caller, tx.value, calldata, exec_gas, false, 0, true, 0);
+                // Intrinsic state gas (new account + auths) already charged via balance deduction.
+                const setup = host.setupCreate(tx.caller, tx.value, calldata, tx_regular_exec_gas, false, 0, true, 0, false);
                 switch (setup) {
                     .failed => |r| {
                         const status: main.ExecutionStatus = if (r.is_revert) .Revert else .Halt;
@@ -267,7 +292,7 @@ pub const MainnetHandler = struct {
                     },
                     .ready => |s| {
                         const init_bytecode = bytecode.Bytecode.newRaw(calldata);
-                        const root_interp = interpreter_mod.Interpreter.new(
+                        var root_interp = interpreter_mod.Interpreter.new(
                             interpreter_mod.Memory.new(),
                             interpreter_mod.ExtBytecode.newOwned(init_bytecode),
                             interpreter_mod.InputsImpl.new(
@@ -275,21 +300,32 @@ pub const MainnetHandler = struct {
                                 s.new_addr,
                                 tx.value,
                                 @constCast(&[_]u8{}),
-                                exec_gas,
+                                tx_regular_exec_gas,
                                 .call,
                                 false,
                                 0,
                             ),
                             false,
                             spec,
-                            exec_gas,
+                            tx_regular_exec_gas,
                         );
+                        // EIP-8037: initialize root frame reservoir.
+                        root_interp.gas.reservoir = tx_reservoir;
                         const ir = try executeIterative(root_interp, &host, &return_data_buf);
-                        const cr = host.finalizeCreate(s.checkpoint, s.new_addr, ir.raw_result, ir.gas_remaining, ir.gas_refunded, ir.return_data, spec);
+                        var cr = host.finalizeCreate(s.checkpoint, s.new_addr, ir.raw_result, ir.gas_remaining, ir.gas_refunded, ir.return_data, spec, false, ir.reservoir_remaining);
+                        if (cr.success) {
+                            cr.state_gas_used += ir.state_gas_used;
+                        }
+                        // On failure: finalizeCreate already set state_gas_remaining = ir.reservoir_remaining
+                        // (the child's remaining reservoir). Do NOT add ir.state_gas_used — state gas that
+                        // spilled from reservoir to regular was already consumed and must not be returned.
                         const cr_status: main.ExecutionStatus = if (cr.success) .Success else if (cr.is_revert) .Revert else .Halt;
-                        var exec_result = main.ExecutionResult.new(cr_status, exec_gas - cr.gas_remaining);
+                        var exec_result = main.ExecutionResult.new(cr_status, 0);
+                        exec_result.state_gas_used = cr.state_gas_used;
                         exec_result.return_data = alloc_mod.get().dupe(u8, cr.return_data) catch @constCast(&[_]u8{});
-                        return main.FrameResult.new(exec_result, cr.gas_remaining, cr.gas_refunded);
+                        var fr = main.FrameResult.new(exec_result, cr.gas_remaining, cr.gas_refunded);
+                        fr.reservoir_remaining = cr.state_gas_remaining;
+                        return fr;
                     },
                 }
             },
@@ -332,7 +368,7 @@ pub const MainnetHandler = struct {
 
                 // Precompile dispatch for top-level TX targeting a precompile.
                 if (evm.precompiles.get(target)) |precompile_fn| {
-                    const pc_result = precompile_fn.execute(calldata, exec_gas);
+                    const pc_result = precompile_fn.execute(calldata, tx_regular_exec_gas);
                     switch (pc_result) {
                         .success => |out| {
                             if (out.reverted) {
@@ -344,11 +380,13 @@ pub const MainnetHandler = struct {
                                 );
                             }
                             ctx.journaled_state.checkpointCommit();
-                            return main.FrameResult.new(
+                            var fr = main.FrameResult.new(
                                 main.ExecutionResult.new(.Success, out.gas_used),
-                                exec_gas - out.gas_used,
+                                tx_regular_exec_gas - out.gas_used,
                                 0,
                             );
+                            fr.reservoir_remaining = tx_reservoir;
+                            return fr;
                         },
                         .err => {
                             ctx.journaled_state.checkpointRevert(call_checkpoint);
@@ -361,7 +399,7 @@ pub const MainnetHandler = struct {
                     }
                 }
 
-                const root_interp = interpreter_mod.Interpreter.new(
+                var root_interp = interpreter_mod.Interpreter.new(
                     interpreter_mod.Memory.new(),
                     interpreter_mod.ExtBytecode.new(callee_code),
                     interpreter_mod.InputsImpl.new(
@@ -369,15 +407,17 @@ pub const MainnetHandler = struct {
                         target,
                         tx.value,
                         @constCast(calldata),
-                        exec_gas,
+                        tx_regular_exec_gas,
                         .call,
                         false,
                         0,
                     ),
                     false,
                     spec,
-                    exec_gas,
+                    tx_regular_exec_gas,
                 );
+                // EIP-8037: initialize root frame reservoir.
+                root_interp.gas.reservoir = tx_reservoir;
                 const ir = try executeIterative(root_interp, &host, &return_data_buf);
 
                 if (ir.raw_result.isSuccess()) {
@@ -391,9 +431,12 @@ pub const MainnetHandler = struct {
                     .revert => .Revert,
                     else => .Halt,
                 };
-                var exec_result = main.ExecutionResult.new(status, exec_gas - ir.gas_remaining);
+                var exec_result = main.ExecutionResult.new(status, 0);
+                exec_result.state_gas_used = ir.state_gas_used;
                 exec_result.return_data = alloc_mod.get().dupe(u8, ir.return_data) catch @constCast(&[_]u8{});
-                return main.FrameResult.new(exec_result, ir.gas_remaining, ir.gas_refunded);
+                var fr = main.FrameResult.new(exec_result, ir.gas_remaining, ir.gas_refunded);
+                fr.reservoir_remaining = ir.reservoir_remaining;
+                return fr;
             },
         }
     }
@@ -412,25 +455,20 @@ pub const MainnetHandler = struct {
         const js = &ctx.journaled_state;
 
         const is_london = primitives.isEnabledIn(spec, .london);
+        const is_amsterdam = primitives.isEnabledIn(spec, .amsterdam);
 
-        // 1. EIP-3529: discard execution (SSTORE) refund on REVERT/Halt/Fail.
-        //    EIP-7702 auth_refund always applies: it represents already-committed preExecution work.
-        const exec_gas = tx.gas_limit - initial_gas.initial_gas;
-        const gas_spent = exec_gas - result.gas_remaining;
-
-        // 2. Compute total gas spent (intrinsic + execution) and apply EIP-7623 floor (Prague+).
-        //
-        // total_gas_spent must be computed before the refund cap (which uses it as the cap basis).
-        // Per Yellow Paper: gas_used = gas_limit - gas_remaining_after_exec = intrinsic + gas_spent.
-        //
-        // The floor is compared against the TOTAL transaction cost (not just exec portion) because
-        // EIP-7623 defines: floor_cost = TX_BASE_COST + tokens*10. The floor applies when
-        //   (total_spent - refund) < (21000 + floor_tokens*10)
-        //
-        // Using exec-only arithmetic would cause underflow when floor_tokens*10 > exec_gas
-        // (which is common: floor=40/nonzero-byte vs standard=16/nonzero-byte calldata gas).
-        const total_gas_spent = initial_gas.initial_gas + gas_spent;
-
+        // EIP-8037 (Amsterdam+): gasUsed = tx.gas_limit - gas_remaining - reservoir_remaining.
+        // This formula accounts for both regular gas and state gas consumed across all frames.
+        // OOG for state gas is handled in-frame (spendStateGas returns false → frame halts).
+        // Pre-Amsterdam: gasUsed = intrinsic + (exec_gas - gas_remaining).
+        var total_gas_spent: u64 = undefined;
+        if (is_amsterdam) {
+            total_gas_spent = tx.gas_limit -| result.gas_remaining -| result.reservoir_remaining;
+        } else {
+            const exec_gas = tx.gas_limit - initial_gas.initial_gas;
+            const gas_spent = exec_gas - result.gas_remaining;
+            total_gas_spent = initial_gas.initial_gas + gas_spent;
+        }
         // SSTORE clearing refund (exec_refund) only on Success (state was not reverted).
         // EIP-7702 auth_refund applies regardless of execution outcome because authorization
         // processing is committed in preExecution regardless of whether execution succeeds.
@@ -439,13 +477,19 @@ pub const MainnetHandler = struct {
         else
             0;
         const auth_refund = @as(u64, @intCast(@max(0, initial_gas.auth_refund)));
+        // EIP-8037 (Amsterdam+): auth_state_refund (112*cpsb per valid existing auth) bypasses
+        // the 1/5 cap — it is a pre-payment correction, not an SSTORE clearing reward.
+        const auth_state_refund: u64 = if (is_amsterdam)
+            initial_gas.auth_state_refund
+        else
+            0;
         const raw_refund: u64 = exec_refund + auth_refund;
         const quotient: u64 = if (is_london) 5 else 2;
         // EIP-3529 refund cap: min(refund, gas_used / max_refund_quotient) where gas_used is
         // the TOTAL gas consumed (intrinsic + execution), not just execution gas.
         // Per Yellow Paper: g* = gas_limit - gas_remaining_after_exec = total_gas_spent.
         var capped_refund = @min(raw_refund, total_gas_spent / quotient);
-        var final_cost = total_gas_spent - capped_refund;
+        var final_cost = total_gas_spent - capped_refund - auth_state_refund;
 
         if (primitives.isEnabledIn(spec, .prague) and !ctx.cfg.disable_eip7623 and initial_gas.floor_gas > 0) {
             // floor_total = TX_BASE_COST + floor_exec_gas (validated: gas_limit >= floor_total)
@@ -453,6 +497,25 @@ pub const MainnetHandler = struct {
             if (final_cost < floor_total) {
                 final_cost = floor_total;
                 capped_refund = 0;
+            }
+        }
+
+        // EIP-8037 (Amsterdam+): for failed txs, receipt gas = min(regular_spent, TX_MAX) + initial_state_gas.
+        // This caps the sender's fee on failed large txs at TX_MAX regular + state intrinsic.
+        if (is_amsterdam and result.result.status != .Success) {
+            capped_refund = 0;
+            const regular_spent = total_gas_spent -| initial_gas.initial_state_gas;
+            const net_state = if (initial_gas.initial_state_gas > auth_state_refund)
+                initial_gas.initial_state_gas - auth_state_refund
+            else
+                0;
+            final_cost = @min(regular_spent, interpreter_mod.gas_costs.TX_MAX_GAS_LIMIT) + net_state;
+            // EIP-7623 floor still applies to failed/reverted txs.
+            if (!ctx.cfg.disable_eip7623 and initial_gas.floor_gas > 0) {
+                const floor_total = 21000 + initial_gas.floor_gas;
+                if (final_cost < floor_total) {
+                    final_cost = floor_total;
+                }
             }
         }
 
@@ -482,7 +545,7 @@ pub const MainnetHandler = struct {
         // 6. Extract logs before commitTx destroys them (only on success — reverted state has no logs).
         if (result.result.status == .Success) {
             // EIP-7708 (Amsterdam+): emit deferred burn logs (sorted by address) after coinbase payment.
-            if (primitives.isEnabledIn(spec, .amsterdam)) {
+            if (is_amsterdam) {
                 js.emitBurnLogs();
             }
             result.result.logs = js.takeLogs();
@@ -491,7 +554,33 @@ pub const MainnetHandler = struct {
         // 7. Commit transaction state
         js.commitTx();
 
-        // 8. Update ExecutionResult with final accounting
+        // 8. Update ExecutionResult with final accounting.
+        // EIP-7778 (Amsterdam+): block gas does NOT deduct refunds.
+        //   block_base = final_cost + capped_refund (= total_gas_spent when no floor,
+        //   = floor_total when floor applied since capped_refund=0 in that case).
+        // EIP-8037 (Amsterdam+):
+        //   - receipt cumulativeGasUsed = final_cost (= regular_after_refunds + state)
+        //   - block gasUsed = max(regular_before_refunds, state_gas) (no refunds deducted)
+        if (is_amsterdam) {
+            // block_base = total_gas_spent - auth_state_refund (SSTORE refunds NOT deducted per EIP-7778;
+            // auth_state_refund IS deducted as it is a pre-payment correction, not an SSTORE reward).
+            const block_base = final_cost + capped_refund;
+            if (result.result.status == .Success) {
+                const total_state_gross = initial_gas.initial_state_gas + result.result.state_gas_used;
+                const total_state = if (total_state_gross > auth_state_refund)
+                    total_state_gross - auth_state_refund
+                else
+                    0;
+                const regular_for_block = if (block_base > total_state) block_base - total_state else 0;
+                result.result.block_gas_used = @max(regular_for_block, total_state);
+            } else {
+                // EIP-8037 (Amsterdam+): failed tx block gas capped at TX_MAX_GAS_LIMIT (1<<24).
+                // Txs with gas > TX_MAX are allowed but contribute at most TX_MAX to block capacity on failure.
+                result.result.block_gas_used = @min(block_base, interpreter_mod.gas_costs.TX_MAX_GAS_LIMIT);
+            }
+        } else {
+            result.result.block_gas_used = final_cost;
+        }
         result.result.gas_used = final_cost;
         result.result.gas_refunded = capped_refund;
     }
@@ -510,6 +599,10 @@ const IterativeResult = struct {
     gas_remaining: u64,
     gas_refunded: i64,
     return_data: []const u8, // points into return_data_buf; valid until buf is cleared
+    /// EIP-8037 (Amsterdam+): total state gas charged across all frames.
+    state_gas_used: u64,
+    /// EIP-8037 (Amsterdam+): state gas reservoir remaining in the root frame after execution.
+    reservoir_remaining: u64,
 };
 
 /// One entry on the iterative call stack.
@@ -555,7 +648,7 @@ fn executeIterative(
 
             switch (pending) {
                 .call => |pc| {
-                    const sub_interp = interpreter_mod.Interpreter.new(
+                    var sub_interp = interpreter_mod.Interpreter.new(
                         interpreter_mod.Memory.new(),
                         interpreter_mod.ExtBytecode.new(pc.code),
                         interpreter_mod.InputsImpl.new(
@@ -572,11 +665,13 @@ fn executeIterative(
                         spec,
                         pc.inputs.gas_limit,
                     );
+                    // EIP-8037: forward the reservoir from parent to child.
+                    sub_interp.gas.reservoir = pc.inputs.reservoir;
                     try frames.append(alloc_mod.get(), .{ .interp = sub_interp, .cause = .{ .call = pc } });
                 },
                 .create => |pc| {
                     const init_bytecode = bytecode.Bytecode.newRaw(pc.inputs.init_code);
-                    const sub_interp = interpreter_mod.Interpreter.new(
+                    var sub_interp = interpreter_mod.Interpreter.new(
                         interpreter_mod.Memory.new(),
                         interpreter_mod.ExtBytecode.newOwned(init_bytecode),
                         interpreter_mod.InputsImpl.new(
@@ -593,6 +688,8 @@ fn executeIterative(
                         spec,
                         pc.inputs.gas_limit,
                     );
+                    // EIP-8037: forward the reservoir from parent to child.
+                    sub_interp.gas.reservoir = pc.inputs.reservoir;
                     try frames.append(alloc_mod.get(), .{ .interp = sub_interp, .cause = .{ .create = pc } });
                 },
                 .none => unreachable,
@@ -604,6 +701,8 @@ fn executeIterative(
                 const raw = frame.interp.result;
                 const gas_rem = frame.interp.gas.remaining;
                 const gas_ref = frame.interp.gas.refunded;
+                const root_state_gas = frame.interp.gas.state_gas_used;
+                const root_reservoir = frame.interp.gas.reservoir;
                 const rd_raw: []const u8 = if (raw.isSuccess() or raw == .revert)
                     frame.interp.return_data.data
                 else
@@ -616,6 +715,8 @@ fn executeIterative(
                     .gas_remaining = gas_rem,
                     .gas_refunded = gas_ref,
                     .return_data = return_data_buf.items,
+                    .state_gas_used = root_state_gas,
+                    .reservoir_remaining = root_reservoir,
                 };
             }
 
@@ -623,6 +724,8 @@ fn executeIterative(
             const sub_result = frame.interp.result;
             const sub_gas_rem = frame.interp.gas.remaining;
             const sub_gas_ref = frame.interp.gas.refunded;
+            const sub_state_gas = frame.interp.gas.state_gas_used;
+            const sub_reservoir = frame.interp.gas.reservoir;
             const rd_raw: []const u8 = if (sub_result.isSuccess() or sub_result == .revert)
                 frame.interp.return_data.data
             else
@@ -638,11 +741,28 @@ fn executeIterative(
 
             switch (cause) {
                 .call => |pc| {
-                    const r = host.finalizeCall(pc.checkpoint, sub_result, pc.inputs.gas_limit, sub_gas_rem, sub_gas_ref, return_data_buf.items);
+                    var r = host.finalizeCall(pc.checkpoint, sub_result, pc.inputs.gas_limit, sub_gas_rem, sub_gas_ref, return_data_buf.items);
+                    // EIP-8037: on success, propagate child's state gas and remaining reservoir.
+                    // On failure, restore ALL child state gas + reservoir to parent's reservoir.
+                    if (r.success) {
+                        r.state_gas_used = sub_state_gas;
+                        r.state_gas_remaining = sub_reservoir;
+                    } else {
+                        r.state_gas_used = 0;
+                        r.state_gas_remaining = sub_state_gas + sub_reservoir;
+                    }
                     call_ops.resumeCall(&parent.interp, r, pc.ret_off, pc.ret_size);
                 },
                 .create => |pc| {
-                    const r = host.finalizeCreate(pc.checkpoint, pc.new_addr, sub_result, sub_gas_rem, sub_gas_ref, return_data_buf.items, parent_spec);
+                    var r = host.finalizeCreate(pc.checkpoint, pc.new_addr, sub_result, sub_gas_rem, sub_gas_ref, return_data_buf.items, parent_spec, true, sub_reservoir);
+                    // EIP-8037: on success, add child's accumulated state gas (from nested ops in initcode).
+                    // On failure, finalizeCreate already sets state_gas_remaining = sub_reservoir;
+                    // add sub_state_gas so all child state gas is returned to parent's reservoir.
+                    if (r.success) {
+                        r.state_gas_used += sub_state_gas;
+                    } else {
+                        r.state_gas_remaining += sub_state_gas;
+                    }
                     call_ops.resumeCreate(&parent.interp, r);
                 },
             }
@@ -670,7 +790,7 @@ pub const ExecuteEvm = struct {
         };
 
         // Execute frame
-        var frame_result = MainnetHandler.executeFrame(evm, initial_gas.initial_gas) catch |err| {
+        var frame_result = MainnetHandler.executeFrame(evm, initial_gas) catch |err| {
             MainnetHandler.catchError(evm, err);
             return main.ExecutionResult.new(.Fail, 0);
         };

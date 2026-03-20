@@ -106,7 +106,8 @@ pub fn opDupN(ctx: *InstructionContext) void {
         return;
     }
     const n: usize = (@as(usize, imm) + 145) % 256;
-    if (!stack.hasItems(n)) {
+    // n == 0 or n <= 16: depth 0 is invalid, depths 1-16 overlap DUP1-DUP16 (also invalid for DUPN).
+    if (n <= 16 or !stack.hasItems(n)) {
         ctx.interpreter.halt(.stack_underflow);
         return;
     }

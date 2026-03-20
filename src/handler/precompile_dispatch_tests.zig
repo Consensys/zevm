@@ -84,6 +84,7 @@ test "precompile dispatch: IDENTITY returns input unchanged" {
         .gas_limit = 100_000,
         .scheme = .call,
         .is_static = false,
+        .reservoir = 0,
     });
 
     try std.testing.expect(result.success);
@@ -115,6 +116,7 @@ test "precompile dispatch: IDENTITY with no data returns empty" {
         .gas_limit = 100_000,
         .scheme = .call,
         .is_static = false,
+        .reservoir = 0,
     });
 
     try std.testing.expect(result.success);
@@ -145,6 +147,7 @@ test "precompile dispatch: out-of-gas fails and consumes all gas" {
         .gas_limit = 10, // not enough
         .scheme = .call,
         .is_static = false,
+        .reservoir = 0,
     });
 
     try std.testing.expect(!result.success);
@@ -174,6 +177,7 @@ test "precompile dispatch: null precompiles falls back to interpreter (no precom
         .gas_limit = 100_000,
         .scheme = .call,
         .is_static = false,
+        .reservoir = 0,
     });
 
     // Without precompile dispatch, IDENTITY address is an empty contract (STOP)
