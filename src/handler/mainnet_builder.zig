@@ -322,6 +322,12 @@ pub const MainnetHandler = struct {
                             0,
                         );
                     }
+                    // EIP-7708 (Amsterdam+): emit Transfer log for ETH sent via TX.
+                    if (primitives.isEnabledIn(spec, .amsterdam) and
+                        !std.mem.eql(u8, &tx.caller, &target))
+                    {
+                        ctx.journaled_state.emitTransferLog(tx.caller, target, tx.value);
+                    }
                 }
 
                 // Precompile dispatch for top-level TX targeting a precompile.
@@ -475,6 +481,10 @@ pub const MainnetHandler = struct {
 
         // 6. Extract logs before commitTx destroys them (only on success — reverted state has no logs).
         if (result.result.status == .Success) {
+            // EIP-7708 (Amsterdam+): emit deferred burn logs (sorted by address) after coinbase payment.
+            if (primitives.isEnabledIn(spec, .amsterdam)) {
+                js.emitBurnLogs();
+            }
             result.result.logs = js.takeLogs();
         }
 
