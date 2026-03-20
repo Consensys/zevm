@@ -163,6 +163,10 @@ pub const Host = struct {
         return self.ctx.blockHash(number);
     }
 
+    pub fn slotNumber(self: *Host) u64 {
+        return self.ctx.block.slot_number;
+    }
+
     // -----------------------------------------------------------------------
     // Account state access (via journaled_state)
     // -----------------------------------------------------------------------
