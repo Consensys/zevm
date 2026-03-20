@@ -45,7 +45,7 @@ fn runPendingCreate(host: *Host, interp: *Interpreter, spec: primitives.SpecId) 
             var rd_buf: std.ArrayList(u8) = .{};
             defer rd_buf.deinit(std.heap.c_allocator);
             rd_buf.appendSlice(std.heap.c_allocator, rd) catch {};
-            const r = host.finalizeCreate(pc.checkpoint, pc.new_addr, sub.result, sub.gas.remaining, sub.gas.refunded, rd_buf.items, spec);
+            const r = host.finalizeCreate(pc.checkpoint, pc.new_addr, sub.result, sub.gas.remaining, sub.gas.refunded, rd_buf.items, spec, true, sub.gas.reservoir);
             call_ops.resumeCreate(interp, r);
             interp.pending = .none;
         },

@@ -5,10 +5,15 @@ const primitives = @import("primitives");
 pub const Gas = struct {
     /// The initial gas limit. This is constant throughout execution.
     limit: u64,
-    /// The remaining gas.
+    /// The remaining regular gas.
     remaining: u64,
     /// Refunded gas. This is used only at the end of execution.
     refunded: i64,
+    /// EIP-8037 (Amsterdam+): total state gas charged during this frame.
+    state_gas_used: u64,
+    /// EIP-8037 (Amsterdam+): state gas reservoir (state_gas_left).
+    /// State gas charges draw from here first, then spill into `remaining`.
+    reservoir: u64,
     /// Memoisation of values for memory expansion cost.
     memory: MemoryGas,
 
@@ -18,6 +23,8 @@ pub const Gas = struct {
             .limit = limit,
             .remaining = limit,
             .refunded = 0,
+            .state_gas_used = 0,
+            .reservoir = 0,
             .memory = MemoryGas.new(),
         };
     }
@@ -28,6 +35,8 @@ pub const Gas = struct {
             .limit = limit,
             .remaining = 0,
             .refunded = 0,
+            .state_gas_used = 0,
+            .reservoir = 0,
             .memory = MemoryGas.new(),
         };
     }
@@ -76,6 +85,28 @@ pub const Gas = struct {
         }
         self.remaining -= amount;
         return true;
+    }
+
+    /// EIP-8037 (Amsterdam+): Charge state gas.
+    /// Draws from the reservoir first; spills the remainder into `remaining`.
+    /// Returns false (OOG) if neither pool has enough gas.
+    pub fn spendStateGas(self: *Gas, amount: u64) bool {
+        if (self.reservoir >= amount) {
+            self.reservoir -= amount;
+        } else if (self.reservoir +| self.remaining >= amount) {
+            const spill = amount - self.reservoir;
+            self.reservoir = 0;
+            self.remaining -= spill;
+        } else {
+            return false;
+        }
+        self.state_gas_used +|= amount;
+        return true;
+    }
+
+    /// EIP-8037: Add state gas from a successful sub-frame.
+    pub fn addStateGasFromChild(self: *Gas, child_state_gas: u64) void {
+        self.state_gas_used += child_state_gas;
     }
 
     /// Spend all remaining gas

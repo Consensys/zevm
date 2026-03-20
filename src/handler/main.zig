@@ -35,8 +35,13 @@ pub const ValidationError = validation.ValidationError;
 pub const ExecutionResult = struct {
     /// Execution status
     status: ExecutionStatus,
-    /// Gas used (final, after refund capping and floor enforcement)
+    /// Gas used for receipt cumulativeGasUsed (= regular + state for Amsterdam+).
     gas_used: u64,
+    /// EIP-8037 (Amsterdam+): gas used for block gas limit = max(regular, state).
+    /// Equals gas_used for pre-Amsterdam.
+    block_gas_used: u64,
+    /// EIP-8037 (Amsterdam+): total state gas charged during execution.
+    state_gas_used: u64,
     /// Gas refunded (final capped refund, set in postExecution)
     gas_refunded: u64,
     /// Logs emitted during execution
@@ -51,6 +56,8 @@ pub const ExecutionResult = struct {
         return ExecutionResult{
             .status = status,
             .gas_used = gas_used,
+            .block_gas_used = gas_used,
+            .state_gas_used = 0,
             .gas_refunded = 0,
             .logs = std.ArrayList(primitives.Log){},
             .return_data = @constCast(&[_]u8{}),
@@ -135,6 +142,9 @@ pub const FrameResult = struct {
     gas_remaining: u64,
     /// Raw refund counter from interpreter (before capping)
     gas_refunded: i64,
+    /// EIP-8037 (Amsterdam+): state gas reservoir remaining after execution.
+    /// Used in gasUsed formula: gas_used = tx.gas_limit - gas_remaining - reservoir_remaining.
+    reservoir_remaining: u64,
     /// Memory
     memory: interpreter.Memory,
     /// Stack
@@ -146,6 +156,7 @@ pub const FrameResult = struct {
             .result = result,
             .gas_remaining = gas_remaining,
             .gas_refunded = gas_refunded,
+            .reservoir_remaining = 0,
             .memory = interpreter.Memory.new(),
             .stack = interpreter.Stack.new(),
         };
@@ -305,14 +316,17 @@ pub const Frame = struct {
 
         const gas_used = self.interpreter.gas.getSpent();
         const gas_refunded = self.interpreter.gas.refunded;
+        const state_gas_used = self.interpreter.gas.state_gas_used;
         const status: ExecutionStatus = switch (self.interpreter.result) {
             .stop, .@"return", .selfdestruct => .Success,
             .revert => .Revert,
             else => .Halt,
         };
 
+        var exec_result = ExecutionResult.new(status, gas_used);
+        exec_result.state_gas_used = state_gas_used;
         return FrameResult.new(
-            ExecutionResult.new(status, gas_used),
+            exec_result,
             self.interpreter.gas.remaining,
             gas_refunded,
         );
