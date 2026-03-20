@@ -425,7 +425,7 @@ pub const Host = struct {
             .gas_remaining = gas_rem,
             .gas_refunded = refunded,
             .delegation_gas = 0,
-            .state_gas_used = 0,      // set by frame runner after finalizeCall
+            .state_gas_used = 0, // set by frame runner after finalizeCall
             .state_gas_remaining = 0, // set by frame runner after finalizeCall
         };
     }
