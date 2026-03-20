@@ -92,6 +92,75 @@ pub fn makeSwapFn(comptime n: u8) InstructionFn {
     }.op;
 }
 
+/// DUPN (0xE6): Duplicate item at depth n from top (EIP-8024, Amsterdam+).
+/// Reads 1 immediate byte `imm`. Depth n = (imm + 145) % 256 (1-indexed for dupUnsafe).
+/// Gas: 3 (G_VERYLOW, charged by dispatch).
+pub fn opDupN(ctx: *InstructionContext) void {
+    const stack = &ctx.interpreter.stack;
+    const imm = ctx.interpreter.bytecode.readImmediates(1)[0];
+    ctx.interpreter.bytecode.relativeJump(1);
+    const n: usize = (@as(usize, imm) + 145) % 256;
+    // n == 0 or n <= 16: depth 0 is invalid, depths 1-16 overlap DUP1-DUP16 (also invalid for DUPN).
+    if (n <= 16 or !stack.hasItems(n)) {
+        ctx.interpreter.halt(.stack_underflow);
+        return;
+    }
+    if (!stack.hasSpace(1)) {
+        ctx.interpreter.halt(.stack_overflow);
+        return;
+    }
+    stack.dupUnsafe(n);
+}
+
+/// SWAPN (0xE7): Swap top with item at 0-indexed depth n (EIP-8024, Amsterdam+).
+/// Reads 1 immediate byte `imm`. Depth n = (imm + 145) % 256.
+/// Gas: 3 (G_VERYLOW, charged by dispatch).
+pub fn opSwapN(ctx: *InstructionContext) void {
+    const stack = &ctx.interpreter.stack;
+    const imm = ctx.interpreter.bytecode.readImmediates(1)[0];
+    ctx.interpreter.bytecode.relativeJump(1);
+    const n: usize = (@as(usize, imm) + 145) % 256;
+    if (!stack.hasItems(n + 1)) {
+        ctx.interpreter.halt(.stack_underflow);
+        return;
+    }
+    stack.swapUnsafe(n);
+}
+
+/// EXCHANGE (0xE8): Swap two non-top stack items (EIP-8024, Amsterdam+).
+/// Immediate byte `x` decoded via EIP-8024 decode_pair:
+///   k = x ^ 143; q = k >> 4; r = k & 0xF
+///   if q < r: n = q+1, m = r+1
+///   else:     n = r+1, m = 29-q
+/// Valid range: 0..=81 or 128..=255 (82..=127 → exceptional failure).
+/// Swaps stack[top - n] and stack[top - m], needs m+1 items (n < m always).
+/// Gas: 3 (G_VERYLOW, charged by dispatch).
+pub fn opExchange(ctx: *InstructionContext) void {
+    const stack = &ctx.interpreter.stack;
+    const imm = ctx.interpreter.bytecode.readImmediates(1)[0];
+    ctx.interpreter.bytecode.relativeJump(1);
+    // Immediates 82..=127 (0x52..=0x7F) are invalid per EIP-8024.
+    if (imm >= 82 and imm <= 127) {
+        ctx.interpreter.halt(.invalid_opcode);
+        return;
+    }
+    // decode_pair: k = imm XOR 143, q = k >> 4, r = k & 0xF
+    const k: usize = @as(usize, imm) ^ 143;
+    const q: usize = k >> 4;
+    const r: usize = k & 0xF;
+    const n: usize = if (q < r) q + 1 else r + 1; // smaller depth (1..14)
+    const m: usize = if (q < r) r + 1 else 29 - q; // larger depth (n < m)
+    // Need m+1 items on stack.
+    if (!stack.hasItems(m + 1)) {
+        ctx.interpreter.halt(.stack_underflow);
+        return;
+    }
+    const top_idx = stack.length - 1;
+    const tmp = stack.data[top_idx - n];
+    stack.data[top_idx - n] = stack.data[top_idx - m];
+    stack.data[top_idx - m] = tmp;
+}
+
 test {
     _ = @import("stack_tests.zig");
 }
