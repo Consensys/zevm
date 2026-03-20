@@ -272,6 +272,15 @@ pub const WarmAddresses = struct {
 pub const JournalCheckpoint = struct {
     log_i: usize,
     journal_i: usize,
+    /// Index into JournalInner.pending_burns at checkpoint time (for EIP-7708 revert).
+    burn_i: usize,
+};
+
+/// Pending burn entry for EIP-7708: a same-tx-created account that selfdestructed to itself.
+/// Burn logs are emitted at finalization (postExecution), sorted by address.
+pub const PendingBurn = struct {
+    address: primitives.Address,
+    amount: primitives.U256,
 };
 
 /// State load result
@@ -381,6 +390,9 @@ pub const JournalInner = struct {
     spec: primitives.SpecId,
     /// Warm addresses containing both coinbase and current precompiles.
     warm_addresses: WarmAddresses,
+    /// EIP-7708: pending burn entries for same-tx-created accounts that selfdestructed to self.
+    /// Emitted as Burn logs at postExecution, sorted by address. Checkpointed via burn_i.
+    pending_burns: std.ArrayList(PendingBurn),
 
     pub fn new() JournalInner {
         return .{
@@ -391,6 +403,7 @@ pub const JournalInner = struct {
             .transaction_id = 0,
             .spec = primitives.SpecId.prague,
             .warm_addresses = WarmAddresses.new(),
+            .pending_burns = std.ArrayList(PendingBurn){},
         };
     }
 
@@ -401,6 +414,7 @@ pub const JournalInner = struct {
         self.logs.deinit(alloc_mod.get());
         self.journal.deinit(alloc_mod.get());
         self.warm_addresses.deinit();
+        self.pending_burns.deinit(alloc_mod.get());
     }
 
     /// Returns the logs
@@ -439,6 +453,7 @@ pub const JournalInner = struct {
         // Free heap-allocated data/topics (in case takeLogs() was not called — e.g. failed tx)
         for (self.logs.items) |log| log.deinit(alloc_mod.get());
         self.logs.clearRetainingCapacity();
+        self.pending_burns.clearRetainingCapacity();
     }
 
     /// Discard the current transaction, by reverting the journal entries and incrementing the transaction id.
@@ -457,6 +472,7 @@ pub const JournalInner = struct {
         // Free heap-allocated data/topics before clearing the log list
         for (self.logs.items) |log| log.deinit(alloc_mod.get());
         self.logs.clearRetainingCapacity();
+        self.pending_burns.clearRetainingCapacity();
         self.transaction_id += 1;
         self.warm_addresses.clearCoinbaseAndAccessList();
     }
@@ -472,6 +488,7 @@ pub const JournalInner = struct {
         self.evm_state = state.EvmState.init(alloc_mod.get());
         for (self.logs.items) |log| log.deinit(alloc_mod.get());
         self.logs.clearRetainingCapacity();
+        self.pending_burns.clearRetainingCapacity();
         self.transient_storage.clearRetainingCapacity();
         self.journal.clearRetainingCapacity();
         self.transaction_id = 0;
@@ -693,6 +710,7 @@ pub const JournalInner = struct {
         return JournalCheckpoint{
             .log_i = self.logs.items.len,
             .journal_i = self.journal.items.len,
+            .burn_i = self.pending_burns.items.len,
         };
     }
 
@@ -707,6 +725,8 @@ pub const JournalInner = struct {
         // Free heap-allocated data/topics of logs being discarded by this revert.
         for (self.logs.items[checkpoint.log_i..]) |log| log.deinit(alloc_mod.get());
         self.logs.shrinkRetainingCapacity(checkpoint.log_i);
+        // Revert EIP-7708 pending burns added since this checkpoint.
+        self.pending_burns.shrinkRetainingCapacity(checkpoint.burn_i);
 
         // iterate over last N journals sets and revert our global evm_state
         if (checkpoint.journal_i < self.journal.items.len) {
@@ -726,6 +746,75 @@ pub const JournalInner = struct {
     /// current spec enables Cancun, this happens only when the account associated to address
     /// is created in the same tx
     ///
+    // ─── EIP-7708 helpers ─────────────────────────────────────────────────────────
+
+    /// EIP-7708: Build and append a Transfer(from, to, amount) log to the journal log list.
+    /// Address is encoded into the upper 12 zero-padded bytes of a 32-byte topic.
+    /// OOM silently skips the log (same policy as addLog).
+    fn addEip7708TransferLog(self: *JournalInner, from: primitives.Address, to: primitives.Address, amount: primitives.U256) void {
+        const alloc = alloc_mod.get();
+        const topics = alloc.alloc(primitives.Hash, 3) catch return;
+        topics[0] = primitives.EIP7708_TRANSFER_TOPIC;
+        topics[1] = std.mem.zeroes([32]u8);
+        @memcpy(topics[1][12..], &from);
+        topics[2] = std.mem.zeroes([32]u8);
+        @memcpy(topics[2][12..], &to);
+        const data = alloc.alloc(u8, 32) catch {
+            alloc.free(topics);
+            return;
+        };
+        const amount_bytes: [32]u8 = @bitCast(@byteSwap(amount));
+        @memcpy(data, &amount_bytes);
+        self.addLog(.{
+            .address = primitives.EIP7708_LOG_ADDRESS,
+            .topics = topics,
+            .data = data,
+        });
+    }
+
+    /// EIP-7708: Build and append a Burn(address, amount) log to the journal log list.
+    fn addEip7708BurnLog(self: *JournalInner, addr: primitives.Address, amount: primitives.U256) void {
+        const alloc = alloc_mod.get();
+        const topics = alloc.alloc(primitives.Hash, 2) catch return;
+        topics[0] = primitives.EIP7708_BURN_TOPIC;
+        topics[1] = std.mem.zeroes([32]u8);
+        @memcpy(topics[1][12..], &addr);
+        const data = alloc.alloc(u8, 32) catch {
+            alloc.free(topics);
+            return;
+        };
+        const amount_bytes: [32]u8 = @bitCast(@byteSwap(amount));
+        @memcpy(data, &amount_bytes);
+        self.addLog(.{
+            .address = primitives.EIP7708_LOG_ADDRESS,
+            .topics = topics,
+            .data = data,
+        });
+    }
+
+    /// EIP-7708: Add a pending burn entry (SELFDESTRUCT-to-self on same-tx-created account).
+    /// Burn logs are deferred to postExecution and emitted sorted by address.
+    fn addPendingBurn(self: *JournalInner, addr: primitives.Address, amount: primitives.U256) void {
+        self.pending_burns.append(alloc_mod.get(), .{ .address = addr, .amount = amount }) catch {};
+    }
+
+    /// EIP-7708: Sort pending burns by address and emit Burn logs into self.logs.
+    /// Called from postExecution after coinbase payment, before takeLogs().
+    pub fn emitBurnLogs(self: *JournalInner) void {
+        if (self.pending_burns.items.len == 0) return;
+        std.mem.sort(PendingBurn, self.pending_burns.items, {}, struct {
+            fn lessThan(_: void, a: PendingBurn, b: PendingBurn) bool {
+                return std.mem.order(u8, &a.address, &b.address) == .lt;
+            }
+        }.lessThan);
+        for (self.pending_burns.items) |burn| {
+            self.addEip7708BurnLog(burn.address, burn.amount);
+        }
+        self.pending_burns.clearRetainingCapacity();
+    }
+
+    // ─── Selfdestruct ──────────────────────────────────────────────────────────────
+
     /// # References:
     ///  * <https://github.com/ethereum/go-ethereum/blob/141cd425310b503c5678e674a8c3872cf46b7086/core/vm/instructions.go#L832-L833>
     ///  * <https://github.com/ethereum/go-ethereum/blob/141cd425310b503c5678e674a8c3872cf46b7086/core/evm_state/evm_statedb.go#L449>
@@ -778,6 +867,19 @@ pub const JournalInner = struct {
 
         if (journal_entry) |entry| {
             self.journal.append(alloc_mod.get(), entry) catch {};
+        }
+
+        // EIP-7708 (Amsterdam+): emit Transfer or deferred Burn log for ETH movements.
+        if (primitives.isEnabledIn(self.spec, .amsterdam) and balance > 0) {
+            if (!std.mem.eql(u8, &address, &target)) {
+                // SELFDESTRUCT to a different address: ETH is transferred.
+                self.addEip7708TransferLog(address, target, balance);
+            } else if (acc.isCreatedLocally() or !is_cancun_enabled) {
+                // SELFDESTRUCT to self on a same-tx-created account (or pre-Cancun):
+                // account is actually destroyed; ETH is burned. Emit immediately at opcode invocation.
+                self.addEip7708BurnLog(address, balance);
+            }
+            // SELFDESTRUCT to self on a pre-existing account (Cancun+): no-op, no log.
         }
 
         return StateLoad(SelfDestructResult).new(SelfDestructResult{
@@ -1156,6 +1258,18 @@ pub fn Journal(comptime DB: type) type {
 
         pub fn takeLogs(self: *@This()) std.ArrayList(primitives.Log) {
             return self.inner.takeLogs();
+        }
+
+        /// EIP-7708: Emit a Transfer log (Amsterdam+). Caller must already have verified
+        /// that `from != to` and `amount > 0` and that the spec is Amsterdam or later.
+        pub fn emitTransferLog(self: *@This(), from: primitives.Address, to: primitives.Address, amount: primitives.U256) void {
+            self.inner.addEip7708TransferLog(from, to, amount);
+        }
+
+        /// EIP-7708: Sort and emit pending burn logs into the log list.
+        /// Call after coinbase payment and before takeLogs() in postExecution.
+        pub fn emitBurnLogs(self: *@This()) void {
+            self.inner.emitBurnLogs();
         }
 
         pub fn commitTx(self: *@This()) void {
