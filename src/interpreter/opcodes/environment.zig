@@ -515,8 +515,15 @@ pub fn opBlobbasefee(ctx: *InstructionContext) void {
 
 /// SLOTNUM (0x4B): Push the beacon chain slot number (EIP-7843, Amsterdam+).
 /// Stack: [] -> [slotNumber]   Gas: 2 (G_BASE, dispatch)
+///
+/// Halts with `invalid_opcode` if no host is present or if the block environment
+/// does not carry a slot number (e.g. pre-Amsterdam or non-beacon execution).
 pub fn opSlotnum(ctx: *InstructionContext) void {
     const h = ctx.host orelse {
+        ctx.interpreter.halt(.invalid_opcode);
+        return;
+    };
+    const slot = h.slotNumber() orelse {
         ctx.interpreter.halt(.invalid_opcode);
         return;
     };
@@ -525,5 +532,5 @@ pub fn opSlotnum(ctx: *InstructionContext) void {
         ctx.interpreter.halt(.stack_overflow);
         return;
     }
-    stack.pushUnsafe(@as(primitives.U256, h.slotNumber()));
+    stack.pushUnsafe(@as(primitives.U256, slot));
 }

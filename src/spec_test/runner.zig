@@ -259,7 +259,7 @@ pub fn runTestCase(tc: types.TestCase, allocator: std.mem.Allocator) TestOutcome
         .difficulty = u256FromBeBytes(tc.block_difficulty),
         .prevrandao = tc.prevrandao,
         .blob_excess_gas_and_price = blob_excess_gas_and_price,
-        .slot_number = 0,
+        .slot_number = null,
     });
 
     // Build access list for TxEnv
