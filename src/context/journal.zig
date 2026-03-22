@@ -276,8 +276,16 @@ pub const JournalCheckpoint = struct {
     burn_i: usize,
 };
 
-/// Pending burn entry for EIP-7708: a same-tx-created account that selfdestructed to itself.
-/// Burn logs are emitted at finalization (postExecution), sorted by address.
+/// EIP-7708 deferred burn entry.
+///
+/// Tracks an account in `accounts_to_delete` that may receive ETH after its SELFDESTRUCT opcode
+/// executes and before the transaction finalizes (e.g. a payer contract calling into the already-
+/// destructed address, or the coinbase receiving its priority fee).  These accounts are added to
+/// `pending_burns` at SELFDESTRUCT time; `emitBurnLogs()` re-reads their balance after the
+/// coinbase payment and emits a Burn log for any non-zero remainder.
+///
+/// `amount` is unused — it is kept for potential future use (e.g. assertions) but the finalization
+/// path always reads the live balance from `evm_state`.
 pub const PendingBurn = struct {
     address: primitives.Address,
     amount: primitives.U256,
@@ -792,14 +800,36 @@ pub const JournalInner = struct {
         });
     }
 
-    /// EIP-7708: Add a pending burn entry (SELFDESTRUCT-to-self on same-tx-created account).
-    /// Burn logs are deferred to postExecution and emitted sorted by address.
+    /// EIP-7708: Register an account for a deferred finalization burn check.
+    ///
+    /// Called at SELFDESTRUCT time for every account entering `accounts_to_delete` (i.e. same-tx-
+    /// created accounts under Cancun+, or any account pre-Cancun).  `amount` is stored but not
+    /// used by `emitBurnLogs()`; pass 0.  The entry is checkpointed so it can be reverted if the
+    /// enclosing call frame reverts.
     fn addPendingBurn(self: *JournalInner, addr: primitives.Address, amount: primitives.U256) void {
         self.pending_burns.append(alloc_mod.get(), .{ .address = addr, .amount = amount }) catch {};
     }
 
-    /// EIP-7708: Sort pending burns by address and emit Burn logs into self.logs.
-    /// Called from postExecution after coinbase payment, before takeLogs().
+    /// EIP-7708 finalization: emit deferred Burn logs for accounts that received ETH after their
+    /// SELFDESTRUCT opcode executed.
+    ///
+    /// # When this is called
+    /// `postExecution` in `mainnet_builder.zig` calls this after the coinbase priority-fee payment
+    /// and before `takeLogs()` collects the tx log list.  This matches the EELS ordering in
+    /// `process_transaction` (amsterdam/fork.py): miner fee is transferred first, then for each
+    /// address in `accounts_to_delete` the current balance is checked and a Burn log is emitted
+    /// if non-zero.
+    ///
+    /// # Why two Burn logs can appear for the same address
+    /// The SELFDESTRUCT opcode itself emits a Burn log for the balance held *at that moment*
+    /// (see the `addEip7708BurnLog` call in `selfdestruct()`).  The account's `evm_state` balance
+    /// is then zeroed.  Any ETH that arrives afterwards — a payer's CALL sending value, or the
+    /// coinbase receiving its priority fee — accumulates back in `evm_state`.  This second pass
+    /// emits a *separate* Burn log only for that post-SELFDESTRUCT ETH, producing two distinct
+    /// log entries exactly as the EELS reference implementation does.
+    ///
+    /// # Sorting
+    /// Logs are emitted in ascending address order (lexicographic bytes), matching EELS.
     pub fn emitBurnLogs(self: *JournalInner) void {
         if (self.pending_burns.items.len == 0) return;
         std.mem.sort(PendingBurn, self.pending_burns.items, {}, struct {
@@ -808,7 +838,14 @@ pub const JournalInner = struct {
             }
         }.lessThan);
         for (self.pending_burns.items) |burn| {
-            self.addEip7708BurnLog(burn.address, burn.amount);
+            // The account's `evm_state` balance was zeroed when SELFDESTRUCT executed.
+            // Any non-zero balance here is ETH that arrived *after* the opcode (e.g. a
+            // subsequent CALL with value from a payer, or the coinbase priority fee).
+            const finalization_balance = if (self.evm_state.get(burn.address)) |acct|
+                acct.info.balance
+            else
+                0;
+            if (finalization_balance > 0) self.addEip7708BurnLog(burn.address, finalization_balance);
         }
         self.pending_burns.clearRetainingCapacity();
     }
@@ -869,17 +906,53 @@ pub const JournalInner = struct {
             self.journal.append(alloc_mod.get(), entry) catch {};
         }
 
-        // EIP-7708 (Amsterdam+): emit Transfer or deferred Burn log for ETH movements.
-        if (primitives.isEnabledIn(self.spec, .amsterdam) and balance > 0) {
+        // ── EIP-7708 (Amsterdam+): ETH transfer / burn log emission ─────────────────
+        //
+        // EIP-7708 requires a LOG2 event for every wei movement that would otherwise be
+        // invisible on-chain.  There are two distinct moments where logs must be emitted:
+        //
+        //  1. **Opcode time** — when SELFDESTRUCT executes:
+        //       • SELFDESTRUCT to a *different* beneficiary: the ETH is moved now, so a
+        //         Transfer log is emitted immediately (LOG3 with from/to/amount).
+        //       • SELFDESTRUCT to *self* (same-tx-created or pre-Cancun): the ETH is
+        //         destroyed now, so a Burn log is emitted immediately (LOG2 with addr/amount).
+        //         The account's `evm_state` balance is then zeroed by `entry_blk` above.
+        //
+        //  2. **Finalization time** — after the coinbase priority-fee payment:
+        //       Any account in `accounts_to_delete` (same-tx-created SELFDESTRUCTs) may
+        //       receive ETH *after* the opcode executes but *before* the tx commits — for
+        //       example a payer contract calling into the already-destructed address, or
+        //       the coinbase receiving its miner tip.  A second Burn log is emitted for
+        //       this post-opcode ETH via `emitBurnLogs()` in `postExecution`.
+        //
+        // Only accounts in `accounts_to_delete` (isCreatedLocally || pre-Cancun) are
+        // eligible for the finalization burn; pre-existing Cancun+ self-destructed accounts
+        // are a no-op (no state change, no log).
+        //
+        // Reference: ethereum/execution-specs — amsterdam/vm/instructions/system.py
+        //            (selfdestruct) and amsterdam/fork.py (process_transaction finalization).
+        if (primitives.isEnabledIn(self.spec, .amsterdam)) {
             if (!std.mem.eql(u8, &address, &target)) {
-                // SELFDESTRUCT to a different address: ETH is transferred.
-                self.addEip7708TransferLog(address, target, balance);
+                // Case 1a: SELFDESTRUCT to a different beneficiary.
+                // Emit Transfer log immediately for the ETH moved by `entry_blk` above.
+                if (balance > 0) self.addEip7708TransferLog(address, target, balance);
+                // If this account is also in `accounts_to_delete`, register it for the
+                // finalization burn check: a payer may still send ETH to this address
+                // within the same transaction after the opcode returns.
+                if (acc.isCreatedLocally() or !is_cancun_enabled) {
+                    self.addPendingBurn(address, 0);
+                }
             } else if (acc.isCreatedLocally() or !is_cancun_enabled) {
-                // SELFDESTRUCT to self on a same-tx-created account (or pre-Cancun):
-                // account is actually destroyed; ETH is burned. Emit immediately at opcode invocation.
-                self.addEip7708BurnLog(address, balance);
+                // Case 1b: SELFDESTRUCT to self (same-tx-created or pre-Cancun).
+                // Emit Burn log immediately for the ETH destroyed right now, then register
+                // for the finalization burn check so that any ETH arriving *after* this
+                // opcode (payer call, coinbase priority fee) also gets a Burn log.
+                // The two logs are intentionally separate, matching the EELS reference.
+                if (balance > 0) self.addEip7708BurnLog(address, balance);
+                self.addPendingBurn(address, 0);
             }
-            // SELFDESTRUCT to self on a pre-existing account (Cancun+): no-op, no log.
+            // Case 2: SELFDESTRUCT to self on a pre-existing account (Cancun+).
+            // EIP-6780 makes this a no-op — state is unchanged, no log is emitted.
         }
 
         return StateLoad(SelfDestructResult).new(SelfDestructResult{
