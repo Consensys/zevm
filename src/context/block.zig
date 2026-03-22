@@ -30,7 +30,10 @@ pub const BlockEnv = struct {
     /// Incorporated as part of the Cancun upgrade via EIP-4844.
     blob_excess_gas_and_price: ?BlobExcessGasAndPrice,
     /// Beacon chain slot number (EIP-7843, Amsterdam+).
-    slot_number: u64,
+    ///
+    /// `null` when the block header does not carry a slot number (pre-Amsterdam or
+    /// non-beacon chains).  `SLOTNUM` halts with `invalid_opcode` in that case.
+    slot_number: ?u64,
 
     pub fn default() BlockEnv {
         return .{
@@ -42,7 +45,7 @@ pub const BlockEnv = struct {
             .difficulty = @as(primitives.U256, 0),
             .prevrandao = null,
             .blob_excess_gas_and_price = BlobExcessGasAndPrice.new(0, primitives.BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE),
-            .slot_number = 0,
+            .slot_number = null,
         };
     }
 
@@ -172,6 +175,7 @@ pub const BlockEnvBuilder = struct {
             .difficulty = self.difficulty,
             .prevrandao = self.prevrandao,
             .blob_excess_gas_and_price = self.blob_excess_gas_and_price,
+            .slot_number = self.slot_number,
         };
     }
 
@@ -185,6 +189,7 @@ pub const BlockEnvBuilder = struct {
             .difficulty = self.difficulty,
             .prevrandao = self.prevrandao,
             .blob_excess_gas_and_price = self.blob_excess_gas_and_price,
+            .slot_number = self.slot_number,
         };
     }
 
@@ -198,6 +203,7 @@ pub const BlockEnvBuilder = struct {
             .difficulty = self.difficulty,
             .prevrandao = self.prevrandao,
             .blob_excess_gas_and_price = self.blob_excess_gas_and_price,
+            .slot_number = self.slot_number,
         };
     }
 
@@ -211,6 +217,7 @@ pub const BlockEnvBuilder = struct {
             .difficulty = self.difficulty,
             .prevrandao = self.prevrandao,
             .blob_excess_gas_and_price = self.blob_excess_gas_and_price,
+            .slot_number = self.slot_number,
         };
     }
 
@@ -224,6 +231,7 @@ pub const BlockEnvBuilder = struct {
             .difficulty = self.difficulty,
             .prevrandao = self.prevrandao,
             .blob_excess_gas_and_price = self.blob_excess_gas_and_price,
+            .slot_number = self.slot_number,
         };
     }
 
@@ -237,6 +245,7 @@ pub const BlockEnvBuilder = struct {
             .difficulty = difficulty,
             .prevrandao = self.prevrandao,
             .blob_excess_gas_and_price = self.blob_excess_gas_and_price,
+            .slot_number = self.slot_number,
         };
     }
 
@@ -250,6 +259,7 @@ pub const BlockEnvBuilder = struct {
             .difficulty = self.difficulty,
             .prevrandao = prevrandao,
             .blob_excess_gas_and_price = self.blob_excess_gas_and_price,
+            .slot_number = self.slot_number,
         };
     }
 
@@ -263,6 +273,21 @@ pub const BlockEnvBuilder = struct {
             .difficulty = self.difficulty,
             .prevrandao = self.prevrandao,
             .blob_excess_gas_and_price = blob_excess_gas_and_price,
+            .slot_number = self.slot_number,
+        };
+    }
+
+    pub fn setSlotNumber(self: BlockEnvBuilder, slot_number: ?u64) BlockEnvBuilder {
+        return .{
+            .number = self.number,
+            .beneficiary = self.beneficiary,
+            .timestamp = self.timestamp,
+            .gas_limit = self.gas_limit,
+            .basefee = self.basefee,
+            .difficulty = self.difficulty,
+            .prevrandao = self.prevrandao,
+            .blob_excess_gas_and_price = self.blob_excess_gas_and_price,
+            .slot_number = slot_number,
         };
     }
 
@@ -276,7 +301,7 @@ pub const BlockEnvBuilder = struct {
             .difficulty = self.difficulty orelse @as(primitives.U256, 0),
             .prevrandao = self.prevrandao,
             .blob_excess_gas_and_price = self.blob_excess_gas_and_price orelse BlobExcessGasAndPrice.new(0, primitives.BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE),
-            .slot_number = self.slot_number orelse 0,
+            .slot_number = self.slot_number,
         };
     }
 };
