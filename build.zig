@@ -776,4 +776,72 @@ pub fn build(b: *std.Build) void {
 
     const runner_step = b.step("spec-test-runner", "Build the spec test runner");
     runner_step.dependOn(&b.addInstallArtifact(runner_exe, .{}).step);
+
+    // --- Fuzz harness static library ---
+    // Compiled with ReleaseSafe so bounds/overflow checks are active during fuzzing.
+    // Link against this with afl-clang-lto + fuzz/afl_shim.c to build the harness binary.
+    const fuzz_lib = b.addLibrary(.{
+        .name = "zevm-fuzz",
+        .linkage = .static,
+        .root_module = b.addModule("zevm-fuzz", .{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "fuzz/harness/fuzz_transaction.zig" } },
+            .target = target,
+            .optimize = .ReleaseSafe,
+        }),
+    });
+    fuzz_lib.root_module.addImport("build_options", lib_options_module);
+    fuzz_lib.root_module.addImport("primitives", primitives_module);
+    fuzz_lib.root_module.addImport("bytecode", bytecode_module);
+    fuzz_lib.root_module.addImport("state", state_module);
+    fuzz_lib.root_module.addImport("database", database_module);
+    fuzz_lib.root_module.addImport("context", context_module);
+    fuzz_lib.root_module.addImport("interpreter", interpreter_module);
+    fuzz_lib.root_module.addImport("precompile", precompile_module);
+    fuzz_lib.root_module.addImport("handler", handler_module);
+    fuzz_lib.root_module.addImport("zevm_allocator", zevm_allocator_module);
+    addCryptoLibraries(b, fuzz_lib, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
+    b.installArtifact(fuzz_lib);
+
+    const fuzz_lib_step = b.step("fuzz-lib", "Build AFL++ fuzzing harness static library");
+    fuzz_lib_step.dependOn(&b.addInstallArtifact(fuzz_lib, .{}).step);
+
+    // Shared input decoder module (used by fuzz harness and tools)
+    const fuzz_input_decoder_module = b.addModule("input_decoder", .{
+        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "fuzz/harness/input_decoder.zig" } },
+        .target = target,
+        .optimize = optimize,
+    });
+    fuzz_input_decoder_module.addImport("primitives", primitives_module);
+
+    // --- fuzz2spec: convert binary fuzz corpus files to spec test JSON ---
+    const fuzz2spec_exe = b.addExecutable(.{
+        .name = "fuzz2spec",
+        .root_module = b.addModule("fuzz2spec", .{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "fuzz/tools/fuzz2spec.zig" } },
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    fuzz2spec_exe.root_module.addImport("primitives", primitives_module);
+    fuzz2spec_exe.root_module.addImport("input_decoder", fuzz_input_decoder_module);
+    b.installArtifact(fuzz2spec_exe);
+
+    const fuzz2spec_step = b.step("fuzz2spec", "Build fuzz-input-to-spec-test converter");
+    fuzz2spec_step.dependOn(&b.addInstallArtifact(fuzz2spec_exe, .{}).step);
+
+    // --- gen-seeds: convert spec test fixtures to binary seed corpus ---
+    const gen_seeds_exe = b.addExecutable(.{
+        .name = "gen-seeds",
+        .root_module = b.addModule("gen-seeds", .{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "fuzz/tools/gen_seeds.zig" } },
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    gen_seeds_exe.root_module.addImport("primitives", primitives_module);
+    gen_seeds_exe.root_module.addImport("input_decoder", fuzz_input_decoder_module);
+    b.installArtifact(gen_seeds_exe);
+
+    const gen_seeds_step = b.step("gen-seeds", "Build seed corpus generator from spec test fixtures");
+    gen_seeds_step.dependOn(&b.addInstallArtifact(gen_seeds_exe, .{}).step);
 }
