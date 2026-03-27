@@ -185,6 +185,35 @@ pub const Host = struct {
     // Account state access (via journaled_state)
     // -----------------------------------------------------------------------
 
+    /// Check whether an address is cold WITHOUT loading it from the database.
+    /// Used to pre-check gas costs before committing to a DB load (EIP-7928 BAL correctness).
+    pub fn isAddressCold(self: *Host, addr: primitives.Address) bool {
+        return self.ctx.journaled_state.isAddressCold(addr);
+    }
+
+    /// Check whether a storage slot is cold WITHOUT loading it from the database.
+    pub fn isStorageCold(self: *Host, addr: primitives.Address, key: primitives.StorageKey) bool {
+        return self.ctx.journaled_state.isStorageCold(addr, key);
+    }
+
+    /// Un-record a pending address access in the database fallback.
+    /// Called when a CALL loaded an address for gas calculation but went OOG.
+    pub fn untrackAddress(self: *Host, addr: primitives.Address) void {
+        self.ctx.journaled_state.untrackAddress(addr);
+    }
+
+    /// Force-add an address to the current-tx access log in the database fallback.
+    /// Used for EIP-7702 delegation targets that execute but are not in the witness.
+    pub fn forceTrackAddress(self: *Host, addr: primitives.Address) void {
+        self.ctx.journaled_state.forceTrackAddress(addr);
+    }
+
+    /// Check whether an address is already in the EVM state cache.
+    /// Used to avoid un-tracking addresses that were legitimately accessed earlier in the tx.
+    pub fn isAddressLoaded(self: *const Host, addr: primitives.Address) bool {
+        return self.ctx.journaled_state.isAddressLoaded(addr);
+    }
+
     /// Load account info. Returns null on database error.
     /// is_cold indicates whether this was a cold access (for gas charging).
     pub fn accountInfo(self: *Host, addr: primitives.Address) ?struct { balance: primitives.U256, is_cold: bool, is_empty: bool } {
@@ -377,6 +406,8 @@ pub const Host = struct {
 
         // 4. Checkpoint
         const checkpoint = self.ctx.journaled_state.getCheckpoint();
+        // Notify db fallback that a new frame has opened.
+        self.ctx.journaled_state.database.snapshotFrame();
 
         // 5. Value transfer
         if (inputs.value > 0 and inputs.scheme != .delegatecall) {
@@ -412,8 +443,10 @@ pub const Host = struct {
     ) CallResult {
         if (result.isSuccess()) {
             self.ctx.journaled_state.checkpointCommit();
+            self.ctx.journaled_state.database.commitFrame();
         } else {
             self.ctx.journaled_state.checkpointRevert(checkpoint);
+            self.ctx.journaled_state.database.revertFrame();
         }
         const gas_rem: u64 = if (result.isSuccess() or result == .revert) gas_remaining else 0;
         const gas_used = if (gas_limit > gas_rem) gas_limit - gas_rem else 0;
@@ -495,6 +528,14 @@ pub const Host = struct {
         } else createAddress(caller, caller_nonce);
 
         _ = js.loadAccount(new_addr) catch return .{ .failed = CreateResult.preExecFailure(gas_limit) };
+        // Record whether the CREATE target was a non-existent (empty) account.
+        // Used below to un-track it from the EIP-7928 BAL when CREATE fails before init
+        // code: a phantom CREATE target (no pre-state, no ETH received) should not appear
+        // in the BAL, whereas a target with pre-existing state (nonce/code/balance) should.
+        const new_addr_was_nonexistent = if (js.inner.evm_state.get(new_addr)) |na|
+            na.status.loaded_as_not_existing
+        else
+            true;
 
         // EIP-8037 (Amsterdam+): new-account state gas is charged by the opcode (opCreate/opCreate2)
         // BEFORE setupCreate is called, so no additional state gas here on failures.
@@ -507,11 +548,15 @@ pub const Host = struct {
             const caller_acct = js.inner.evm_state.getPtr(caller) orelse {
                 if (is_opcode_create and primitives.isEnabledIn(spec_id, .amsterdam))
                     js.checkpointRevert(pre_bump_checkpoint);
+                // Phantom CREATE target: untrack so it doesn't appear in the EIP-7928 BAL.
+                if (new_addr_was_nonexistent) js.database.untrackAddress(new_addr);
                 return .{ .failed = CreateResult.preExecFailure(gas_limit) };
             };
             if (caller_acct.info.balance < value) {
                 if (is_opcode_create and primitives.isEnabledIn(spec_id, .amsterdam))
                     js.checkpointRevert(pre_bump_checkpoint);
+                // Phantom CREATE target: untrack so it doesn't appear in the EIP-7928 BAL.
+                if (new_addr_was_nonexistent) js.database.untrackAddress(new_addr);
                 return .{ .failed = CreateResult.preExecFailure(gas_limit) };
             }
         }
@@ -547,6 +592,8 @@ pub const Host = struct {
             // In all cases (pre- and post-Amsterdam), consume all forwarded gas.
             return .{ .failed = CreateResult.failure() };
         };
+        // Notify db fallback that a new CREATE frame has opened.
+        js.database.snapshotFrame();
 
         // EIP-7708 (Amsterdam+): emit Transfer log for ETH sent to the new contract.
         if (value > 0 and primitives.isEnabledIn(spec_id, .amsterdam)) {
@@ -578,6 +625,7 @@ pub const Host = struct {
 
         if (!result.isSuccess()) {
             js.checkpointRevert(checkpoint);
+            js.database.revertFrame();
             const gas_rem = if (result == .revert) gas_remaining else @as(u64, 0);
             const rd = if (result == .revert) return_data else &[_]u8{};
             // On failure: all state gas (used + remaining reservoir) returned to parent via frame runner.
@@ -587,6 +635,7 @@ pub const Host = struct {
         const deployed_raw = return_data;
         if (deployed_raw.len > MAX_CODE_SIZE) {
             js.checkpointRevert(checkpoint);
+            js.database.revertFrame();
             // Code-too-large is an ExceptionalHalt: all remaining regular gas is consumed.
             // State gas reservoir is preserved and returned to parent.
             return .{ .success = false, .is_revert = false, .address = [_]u8{0} ** 20, .gas_remaining = 0, .return_data = &[_]u8{}, .gas_refunded = 0, .state_gas_used = 0, .state_gas_remaining = gas_reservoir };
@@ -594,6 +643,7 @@ pub const Host = struct {
         if (primitives.isEnabledIn(spec_id, .london)) {
             if (deployed_raw.len > 0 and deployed_raw[0] == 0xEF) {
                 js.checkpointRevert(checkpoint);
+                js.database.revertFrame();
                 // InvalidContractPrefix (0xEF) is an ExceptionalHalt: all remaining regular gas consumed.
                 // State gas reservoir is preserved and returned to parent.
                 return .{ .success = false, .is_revert = false, .address = [_]u8{0} ** 20, .gas_remaining = 0, .return_data = &[_]u8{}, .gas_refunded = 0, .state_gas_used = 0, .state_gas_remaining = gas_reservoir };
@@ -610,6 +660,7 @@ pub const Host = struct {
             const regular_deposit = gas_costs.G_KECCAK256WORD * @as(u64, code_words);
             if (gas_remaining < regular_deposit) {
                 js.checkpointRevert(checkpoint);
+                js.database.revertFrame();
                 return .{ .success = false, .is_revert = false, .address = [_]u8{0} ** 20, .gas_remaining = 0, .return_data = &[_]u8{}, .gas_refunded = 0, .state_gas_used = 0, .state_gas_remaining = remaining_reservoir };
             }
             var gas_after_regular = gas_remaining - regular_deposit;
@@ -627,6 +678,7 @@ pub const Host = struct {
                 } else {
                     // OOG on code deposit state gas — failure, preserve reservoir for return.
                     js.checkpointRevert(checkpoint);
+                    js.database.revertFrame();
                     return .{ .success = false, .is_revert = false, .address = [_]u8{0} ** 20, .gas_remaining = 0, .return_data = &[_]u8{}, .gas_refunded = 0, .state_gas_used = 0, .state_gas_remaining = remaining_reservoir };
                 }
             }
@@ -637,9 +689,11 @@ pub const Host = struct {
             if (gas_remaining < deposit_cost) {
                 if (primitives.isEnabledIn(spec_id, .homestead)) {
                     js.checkpointRevert(checkpoint);
+                    js.database.revertFrame();
                     return CreateResult.failure();
                 } else {
                     js.checkpointCommit();
+                    js.database.commitFrame();
                     return .{ .success = true, .is_revert = false, .address = new_addr, .gas_remaining = gas_remaining, .return_data = &[_]u8{}, .gas_refunded = gas_refunded, .state_gas_used = 0, .state_gas_remaining = 0 };
                 }
             }
@@ -649,6 +703,7 @@ pub const Host = struct {
         if (deployed_raw.len > 0) {
             const deployed_copy = alloc_mod.get().dupe(u8, deployed_raw) catch {
                 js.checkpointRevert(checkpoint);
+                js.database.revertFrame();
                 return CreateResult.failure();
             };
             var code_hash: [32]u8 = undefined;
@@ -658,6 +713,7 @@ pub const Host = struct {
         }
 
         js.checkpointCommit();
+        js.database.commitFrame();
         return .{ .success = true, .is_revert = false, .address = new_addr, .gas_remaining = gas_after_deposit, .return_data = &[_]u8{}, .gas_refunded = gas_refunded, .state_gas_used = code_deposit_state_gas, .state_gas_remaining = remaining_reservoir };
     }
 

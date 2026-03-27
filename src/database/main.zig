@@ -211,12 +211,58 @@ const StorageKeyContext = struct {
     }
 };
 
+/// Vtable for an optional fallback database on InMemoryDB.
+/// When a lookup misses the in-memory maps the corresponding fallback function
+/// is called (if set).  Set `InMemoryDB.fallback` before execution to wire a
+/// stateless witness database.
+pub const FallbackFns = struct {
+    ctx: *anyopaque,
+    basic: *const fn (*anyopaque, primitives.Address) anyerror!?state.AccountInfo,
+    code_by_hash: *const fn (*anyopaque, primitives.Hash) anyerror!bytecode.Bytecode,
+    storage: *const fn (*anyopaque, primitives.Address, primitives.StorageKey) anyerror!primitives.StorageValue,
+    block_hash: *const fn (*anyopaque, u64) anyerror!primitives.Hash,
+    /// Called when a transaction commits its state (success path).
+    /// The fallback may flush any per-tx pending tracking to permanent state.
+    commit_tx: ?*const fn (*anyopaque) void = null,
+    /// Called when a transaction is discarded (revert / invalid tx path).
+    /// The fallback should drop any per-tx pending tracking.
+    discard_tx: ?*const fn (*anyopaque) void = null,
+    /// Called when a new execution frame (CALL/CREATE) opens a journal checkpoint.
+    /// The fallback should push a new frame level for per-frame pending tracking.
+    snapshot_frame: ?*const fn (*anyopaque) void = null,
+    /// Called when an execution frame commits its journal checkpoint successfully.
+    /// The fallback should merge the current frame's pending into the parent frame.
+    commit_frame: ?*const fn (*anyopaque) void = null,
+    /// Called when an execution frame reverts its journal checkpoint.
+    /// The fallback should discard all pending accesses from the current frame.
+    revert_frame: ?*const fn (*anyopaque) void = null,
+    /// Called to un-record a pending address access (e.g., CALL loaded address for
+    /// gas calculation but then went OOG before the call executed).
+    /// Only removes the address if it was not already committed to the permanent log.
+    untrack_address: ?*const fn (*anyopaque, primitives.Address) void = null,
+    /// Called to force-add an address to the current-tx access log even when its
+    /// account state is not in the witness (e.g., EIP-7702 delegation targets).
+    force_track_address: ?*const fn (*anyopaque, primitives.Address) void = null,
+    /// Called for each storage slot whose present_value differs from original_value,
+    /// BEFORE commitTx() resets original_value. Allows the fallback to track cross-tx
+    /// intermediate writes for EIP-7928 BAL validation (storageChanges vs storageReads).
+    /// `committed_value` is the value being committed (present_value at commit time).
+    pre_commit_tx_slot: ?*const fn (*anyopaque, primitives.Address, primitives.StorageKey, primitives.StorageValue) void = null,
+    /// Called when a storage slot is read from a newly-created account (is_newly_created=true).
+    /// The EVM returns 0 for all such reads without consulting the database, so this
+    /// lightweight hook lets the fallback (e.g. WitnessDatabase) record the access for
+    /// EIP-7928 BAL tracking without performing MPT verification.
+    notify_storage_read: ?*const fn (*anyopaque, primitives.Address, primitives.StorageKey) void = null,
+};
+
 /// In-memory database implementation.
 pub const InMemoryDB = struct {
     accounts: std.AutoHashMap(primitives.Address, state.AccountInfo),
     code: std.AutoHashMap(primitives.Hash, bytecode.Bytecode),
     storage_map: std.HashMap(struct { primitives.Address, primitives.StorageKey }, primitives.StorageValue, StorageKeyContext, std.hash_map.default_max_load_percentage),
     block_hashes: std.AutoHashMap(u64, primitives.Hash),
+    /// Optional fallback: called on cache miss for account/storage/code/blockHash.
+    fallback: ?FallbackFns = null,
 
     const Self = @This();
 
@@ -237,11 +283,18 @@ pub const InMemoryDB = struct {
     }
 
     pub fn basic(self: *Self, address: primitives.Address) !?state.AccountInfo {
-        return self.accounts.get(address);
+        if (self.accounts.get(address)) |acct| {
+            std.debug.print("DBG InMemoryDB.basic CACHED 0x{s}\n", .{std.fmt.bytesToHex(address, .lower)});
+            return acct;
+        }
+        if (self.fallback) |fb| return fb.basic(fb.ctx, address);
+        return null;
     }
 
     pub fn codeByHash(self: *Self, code_hash: primitives.Hash) !bytecode.Bytecode {
-        return self.code.get(code_hash) orelse bytecode.Bytecode.new();
+        if (self.code.get(code_hash)) |bc| return bc;
+        if (self.fallback) |fb| return fb.code_by_hash(fb.ctx, code_hash);
+        return bytecode.Bytecode.new();
     }
 
     pub fn storage(self: *Self, address: primitives.Address, index: primitives.StorageKey) !primitives.StorageValue {
@@ -249,11 +302,68 @@ pub const InMemoryDB = struct {
     }
 
     pub fn getStorage(self: *Self, address: primitives.Address, index: primitives.StorageKey) !primitives.StorageValue {
-        return self.storage_map.get(.{ address, index }) orelse @as(primitives.StorageValue, 0);
+        if (self.storage_map.get(.{ address, index })) |val| return val;
+        if (self.fallback) |fb| return fb.storage(fb.ctx, address, index);
+        return @as(primitives.StorageValue, 0);
     }
 
     pub fn blockHash(self: *Self, number: u64) !primitives.Hash {
-        return self.block_hashes.get(number) orelse [_]u8{0} ** 32;
+        if (self.block_hashes.get(number)) |hash| return hash;
+        if (self.fallback) |fb| return fb.block_hash(fb.ctx, number);
+        return [_]u8{0} ** 32;
+    }
+
+    /// Notify the fallback that a transaction committed successfully.
+    /// No-op if no fallback or fallback has no commit_tx callback.
+    pub fn commitTracking(self: *Self) void {
+        if (self.fallback) |fb| if (fb.commit_tx) |f| f(fb.ctx);
+    }
+
+    /// Notify the fallback that a transaction was discarded (reverted / invalid).
+    /// No-op if no fallback or fallback has no discard_tx callback.
+    pub fn discardTracking(self: *Self) void {
+        if (self.fallback) |fb| if (fb.discard_tx) |f| f(fb.ctx);
+    }
+
+    /// Notify the fallback that a new execution frame opened a journal checkpoint.
+    pub fn snapshotFrame(self: *Self) void {
+        if (self.fallback) |fb| if (fb.snapshot_frame) |f| f(fb.ctx);
+    }
+
+    /// Notify the fallback that the current execution frame committed successfully.
+    pub fn commitFrame(self: *Self) void {
+        if (self.fallback) |fb| if (fb.commit_frame) |f| f(fb.ctx);
+    }
+
+    /// Notify the fallback that the current execution frame was reverted.
+    pub fn revertFrame(self: *Self) void {
+        if (self.fallback) |fb| if (fb.revert_frame) |f| f(fb.ctx);
+    }
+
+    /// Un-record a pending address access in the fallback.
+    /// Called when a CALL loaded an address for gas calculation but then went OOG.
+    pub fn untrackAddress(self: *Self, address: primitives.Address) void {
+        if (self.fallback) |fb| if (fb.untrack_address) |f| f(fb.ctx, address);
+    }
+
+    /// Force-add an address to the current-tx access log regardless of witness state.
+    /// Called for EIP-7702 delegation targets that execute but are not in the witness.
+    pub fn forceTrackAddress(self: *Self, address: primitives.Address) void {
+        if (self.fallback) |fb| if (fb.force_track_address) |f| f(fb.ctx, address);
+    }
+
+    /// Notify the fallback about a storage slot being committed with a changed value,
+    /// called BEFORE commitTx() resets original_value. Only called when present_value
+    /// differs from original_value (i.e., the slot was actually modified this tx).
+    pub fn notifyStorageSlotCommit(self: *Self, address: primitives.Address, slot: primitives.StorageKey, committed_value: primitives.StorageValue) void {
+        if (self.fallback) |fb| if (fb.pre_commit_tx_slot) |f| f(fb.ctx, address, slot, committed_value);
+    }
+
+    /// Notify the fallback that a storage slot was read from a newly-created account.
+    /// The EVM returns 0 for all such reads without consulting the database; this hook
+    /// lets the fallback record the access for EIP-7928 BAL tracking.
+    pub fn notifyStorageRead(self: *Self, address: primitives.Address, slot: primitives.StorageKey) void {
+        if (self.fallback) |fb| if (fb.notify_storage_read) |f| f(fb.ctx, address, slot);
     }
 
     pub fn basicRef(self: Self, address: primitives.Address) !?state.AccountInfo {

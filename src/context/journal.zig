@@ -35,8 +35,8 @@ pub const JournalEntryFactory = struct {
         return JournalEntry{ .CodeChanged = address };
     }
 
-    pub fn storageChanged(address: primitives.Address, key: primitives.StorageKey, old_value: primitives.StorageValue) JournalEntry {
-        return JournalEntry{ .StorageChanged = .{ .address = address, .key = key, .old_value = old_value } };
+    pub fn storageChanged(address: primitives.Address, key: primitives.StorageKey, old_value: primitives.StorageValue, old_was_written: bool) JournalEntry {
+        return JournalEntry{ .StorageChanged = .{ .address = address, .key = key, .old_value = old_value, .old_was_written = old_was_written } };
     }
 
     pub fn storageWarmed(address: primitives.Address, key: primitives.StorageKey) JournalEntry {
@@ -68,7 +68,7 @@ pub const JournalEntry = union(enum) {
     BalanceTransfer: struct { from: primitives.Address, to: primitives.Address, balance: primitives.U256 },
     NonceChanged: primitives.Address,
     CodeChanged: primitives.Address,
-    StorageChanged: struct { address: primitives.Address, key: primitives.StorageKey, old_value: primitives.StorageValue },
+    StorageChanged: struct { address: primitives.Address, key: primitives.StorageKey, old_value: primitives.StorageValue, old_was_written: bool },
     StorageWarmed: struct { address: primitives.Address, key: primitives.StorageKey },
     AccountWarmed: primitives.Address,
     TransientStorageChanged: struct { address: primitives.Address, key: primitives.StorageKey, old_value: primitives.StorageValue },
@@ -143,6 +143,7 @@ pub const JournalEntry = union(enum) {
                 if (evm_state.getPtr(data.address)) |account| {
                     if (account.storage.getPtr(data.key)) |slot| {
                         slot.present_value = data.old_value;
+                        slot.was_written = data.old_was_written;
                     }
                 }
             },
@@ -203,7 +204,7 @@ pub const WarmAddresses = struct {
         try self.precompiles.appendSlice(alloc_mod.get(), addresses);
     }
 
-    pub fn setAccessList(self: *WarmAddresses, access_list: std.HashMap(primitives.Address, std.ArrayList(primitives.StorageKey), std.hash_map.default_hash_fn(primitives.Address), std.hash_map.default_eql_fn(primitives.Address))) !void {
+    pub fn setAccessList(self: *WarmAddresses, access_list: std.AutoHashMap(primitives.Address, std.ArrayList(primitives.StorageKey))) !void {
         // Clear existing access list
         var iterator = self.access_list.iterator();
         while (iterator.next()) |entry| {
@@ -214,8 +215,8 @@ pub const WarmAddresses = struct {
         // Copy new access list
         var new_iterator = access_list.iterator();
         while (new_iterator.next()) |entry| {
-            var storage_keys = std.ArrayList(primitives.StorageKey).init(alloc_mod.get());
-            try storage_keys.appendSlice(entry.value_ptr.items);
+            var storage_keys = std.ArrayList(primitives.StorageKey){};
+            try storage_keys.appendSlice(alloc_mod.get(), entry.value_ptr.items);
             try self.access_list.put(entry.key_ptr.*, storage_keys);
         }
     }
@@ -550,6 +551,8 @@ pub const JournalInner = struct {
         JournalInner.touchAccount(&self.journal, address, account);
 
         self.journal.append(alloc_mod.get(), JournalEntryFactory.codeChanged(address)) catch {};
+
+        std.debug.print("DBG setCodeWithHash 0x{s} hash=0x{s}\n", .{ std.fmt.bytesToHex(address, .lower), std.fmt.bytesToHex(hash, .lower) });
 
         account.info.code_hash = hash;
         account.info.code = code;
@@ -978,6 +981,15 @@ pub const JournalInner = struct {
     }
 
     /// Loads account into memory. If account is already loaded it will be marked as warm.
+    /// Check whether an address is cold WITHOUT loading it from the database.
+    /// Used by opcode handlers to pre-check gas costs before committing to a DB load.
+    pub fn isAddressCold(self: *const JournalInner, address: primitives.Address) bool {
+        if (self.evm_state.get(address)) |acct| {
+            return acct.isColdTransactionId(self.transaction_id);
+        }
+        return self.warm_addresses.isCold(address);
+    }
+
     pub fn loadAccountOptional(self: *JournalInner, db: anytype, address: primitives.Address, load_code: bool, skip_cold_load: bool) !StateLoad(*const state.Account) {
         const load = try self.loadAccountMutOptionalCode(db, address, load_code, skip_cold_load);
         return StateLoad(*const state.Account).new(load.data.account, load.is_cold);
@@ -1065,6 +1077,20 @@ pub const JournalInner = struct {
     /// # Panics
     ///
     /// Panics if the account is not present in the state.
+    /// Check whether a storage slot is cold WITHOUT loading it from the database.
+    pub fn isStorageCold(self: *const JournalInner, address: primitives.Address, key: primitives.StorageKey) bool {
+        if (self.evm_state.get(address)) |acct| {
+            if (acct.storage.get(key)) |slot| {
+                var is_cold = slot.isColdTransactionId(self.transaction_id);
+                if (is_cold and self.warm_addresses.isStorageWarm(address, key)) {
+                    is_cold = false;
+                }
+                return is_cold;
+            }
+        }
+        return !self.warm_addresses.isStorageWarm(address, key);
+    }
+
     pub fn sload(self: *JournalInner, db: anytype, address: primitives.Address, key: primitives.StorageKey, skip_cold_load: bool) !StateLoad(primitives.StorageValue) {
         // assume acc is warm
         const account = self.evm_state.getPtr(address).?;
@@ -1072,7 +1098,12 @@ pub const JournalInner = struct {
 
         if (account.storage.getPtr(key)) |slot| {
             // Storage slot already loaded
-            const is_cold = slot.isColdTransactionId(self.transaction_id);
+            var is_cold = slot.isColdTransactionId(self.transaction_id);
+            // If the slot is cold by transaction ID but the EIP-2930 access list marks it warm,
+            // treat it as warm (same effect as eager pre-warming via sload in preExecution).
+            if (is_cold and self.warm_addresses.isStorageWarm(address, key)) {
+                is_cold = false;
+            }
             if (skip_cold_load and is_cold) {
                 return JournalLoadError.ColdLoadSkipped;
             }
@@ -1086,10 +1117,13 @@ pub const JournalInner = struct {
             if (skip_cold_load) {
                 return JournalLoadError.ColdLoadSkipped;
             }
-            const value = if (is_newly_created)
-                @as(primitives.StorageValue, 0)
-            else
-                try db.storage(address, key);
+            // For newly-created accounts all storage is implicitly zero.  Notify
+            // the fallback (e.g. WitnessDatabase) so it can record the slot for
+            // EIP-7928 BAL tracking without performing an MPT proof lookup.
+            const value = if (is_newly_created) blk: {
+                if (@hasDecl(@TypeOf(db.*), "notifyStorageRead")) db.notifyStorageRead(address, key);
+                break :blk @as(primitives.StorageValue, 0);
+            } else try db.storage(address, key);
             try account.storage.put(key, state.EvmStorageSlot.new(value, self.transaction_id));
             const is_cold = !self.warm_addresses.isStorageWarm(address, key);
             if (is_cold) {
@@ -1121,9 +1155,10 @@ pub const JournalInner = struct {
             }, present.is_cold);
         }
 
-        self.journal.append(alloc_mod.get(), JournalEntryFactory.storageChanged(address, key, present.data)) catch {};
+        self.journal.append(alloc_mod.get(), JournalEntryFactory.storageChanged(address, key, present.data, slot.was_written)) catch {};
         // insert value into present state.
         slot.present_value = new_value;
+        slot.was_written = true;
         return StateLoad(SStoreResult).new(SStoreResult{
             .original_value = slot.originalValue(),
             .present_value = present.data,
@@ -1246,7 +1281,7 @@ pub fn Journal(comptime DB: type) type {
             return self.inner.selfdestruct(self.getDbMut(), address, target);
         }
 
-        pub fn warmAccessList(self: *@This(), access_list: std.HashMap(primitives.Address, std.ArrayList(primitives.StorageKey), std.hash_map.default_hash_fn(primitives.Address), std.hash_map.default_eql_fn(primitives.Address))) !void {
+        pub fn warmAccessList(self: *@This(), access_list: std.AutoHashMap(primitives.Address, std.ArrayList(primitives.StorageKey))) !void {
             try self.inner.warm_addresses.setAccessList(access_list);
         }
 
@@ -1364,6 +1399,35 @@ pub fn Journal(comptime DB: type) type {
 
         pub fn sstoreSkipColdLoad(self: *@This(), address: primitives.Address, key: primitives.StorageKey, value: primitives.StorageValue, skip_cold_load: bool) !StateLoad(SStoreResult) {
             return self.inner.sstore(self.getDbMut(), address, key, value, skip_cold_load);
+        }
+
+        /// Check whether an address is cold WITHOUT loading it from the database.
+        pub fn isAddressCold(self: *const @This(), address: primitives.Address) bool {
+            return self.inner.isAddressCold(address);
+        }
+
+        /// Check whether a storage slot is cold WITHOUT loading it from the database.
+        pub fn isStorageCold(self: *const @This(), address: primitives.Address, key: primitives.StorageKey) bool {
+            return self.inner.isStorageCold(address, key);
+        }
+
+        /// Un-record a pending address access in the database fallback.
+        /// Called when a CALL loaded an address for gas calculation but went OOG.
+        pub fn untrackAddress(self: *@This(), address: primitives.Address) void {
+            self.getDbMut().untrackAddress(address);
+        }
+
+        /// Force-add an address to the current-tx access log in the database fallback.
+        /// Used for EIP-7702 delegation targets that execute but are not in the witness.
+        pub fn forceTrackAddress(self: *@This(), address: primitives.Address) void {
+            self.getDbMut().forceTrackAddress(address);
+        }
+
+        /// Check whether an address is already in the EVM state cache (was loaded before
+        /// this call). Used to avoid un-tracking addresses that were legitimately accessed
+        /// earlier in the same transaction.
+        pub fn isAddressLoaded(self: *const @This(), address: primitives.Address) bool {
+            return self.inner.evm_state.contains(address);
         }
 
         pub fn loadAccountInfoSkipColdLoad(self: *@This(), address: primitives.Address, load_code: bool, skip_cold_load: bool) !AccountInfoLoad {

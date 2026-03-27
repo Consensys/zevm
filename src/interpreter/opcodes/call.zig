@@ -132,9 +132,25 @@ fn callImpl(
         }
     }
 
-    // Determine warm/cold access for target address (code source)
+    // Pre-check: if Berlin+, ensure there's enough gas for the access cost before loading
+    // the callee. This avoids a DB read when the CALL itself runs OOG before the callee
+    // is accessed, which would incorrectly add the callee to the EIP-7928 BAL.
+    const pre_is_cold = h.isAddressCold(target_addr);
+    if (primitives.isEnabledIn(spec, .berlin)) {
+        const access_cost: u64 = if (pre_is_cold) gas_costs.COLD_ACCOUNT_ACCESS else gas_costs.WARM_ACCOUNT_ACCESS;
+        if (ctx.interpreter.gas.remaining < access_cost) {
+            ctx.interpreter.halt(.out_of_gas);
+            return;
+        }
+    }
+
+    // Determine warm/cold access for target address (code source).
+    // Record whether the address was already in the EVM state cache BEFORE this load.
+    // If not already loaded and the full base_cost check later fails (OOG), we untrack
+    // the address — it was loaded only for gas calculation, not for actual execution.
+    const target_already_loaded = h.isAddressLoaded(target_addr);
     const acct_info = h.accountInfo(target_addr);
-    const is_cold = if (acct_info) |info| info.is_cold else true;
+    const is_cold = if (acct_info) |info| info.is_cold else pre_is_cold;
     const transfers_value = has_value and value > 0;
     // G_NEWACCOUNT applies to the ETH *recipient*, not the code source.
     // For CALLCODE/DELEGATECALL, ETH goes to self (always exists). Otherwise ETH goes to target_addr.
@@ -150,10 +166,11 @@ fn callImpl(
     var delegation_gas: u64 = 0;
     if (h.codeInfo(target_addr)) |code_info| {
         if (code_info.bytecode.isEip7702()) {
+            // Use isAddressCold to determine cold/warm cost WITHOUT loading the delegation
+            // target from the DB — avoids tracking it in the BAL during gas calculation.
+            // The sub-frame's setupCall will load it properly and track it there.
             const del_addr = code_info.bytecode.eip7702.address;
-            if (h.accountInfo(del_addr)) |del_info| {
-                delegation_gas = if (del_info.is_cold) gas_costs.COLD_ACCOUNT_ACCESS else gas_costs.WARM_ACCOUNT_ACCESS;
-            }
+            delegation_gas = if (h.isAddressCold(del_addr)) gas_costs.COLD_ACCOUNT_ACCESS else gas_costs.WARM_ACCOUNT_ACCESS;
         }
     }
 
@@ -163,9 +180,17 @@ fn callImpl(
     // Determine forwarded gas (EIP-150 introduces 63/64 rule; pre-EIP-150 uses all remaining).
     const remaining = ctx.interpreter.gas.remaining;
     if (remaining < base_cost) {
+        // The CALL goes OOG before executing. Un-track the target only when it was
+        // loaded purely for new_account_cost gas estimation (non-existing account with
+        // value transfer). Existing accounts (including 7702 sources with delegation_gas
+        // in base_cost) remain in the BAL — they were genuinely accessed.
+        if (!target_already_loaded and transfers_value and !account_exists) {
+            h.untrackAddress(target_addr);
+        }
         ctx.interpreter.halt(.out_of_gas);
         return;
     }
+
 
     const after_base = remaining - base_cost;
 

@@ -146,18 +146,32 @@ pub const MainnetHandler = struct {
         }
 
         // EIP-2929: Pre-warm all access-list addresses and their storage slots.
-        // Calling loadAccountWithCode marks the account warm (cold-load journal entry added).
-        // Calling sload marks each storage slot warm.
+        // Use warmAccessList to mark addresses/slots warm in the access list WITHOUT eagerly
+        // loading them from the database.  Gas accounting uses isCold()/isStorageCold() which
+        // check warm_addresses.access_list — independent of whether the account was DB-loaded.
+        // This ensures pre-warmed-but-never-touched accounts are not tracked as accessed state,
+        // which is required for correct EIP-7928 Block Access List construction.
         if (tx.access_list.items) |items| {
+            const allocator = alloc_mod.get();
+            var map = std.AutoHashMap(
+                primitives.Address,
+                std.ArrayList(primitives.StorageKey),
+            ).init(allocator);
+            defer {
+                var it = map.valueIterator();
+                while (it.next()) |v| v.deinit(allocator);
+                map.deinit();
+            }
             for (items.items) |item| {
-                // Load account (marks it warm, journal entry recorded)
-                _ = try js.loadAccountWithCode(item.address);
-
-                // Load each storage slot (marks it warm, journal entry recorded)
+                const gop = try map.getOrPut(item.address);
+                if (!gop.found_existing) {
+                    gop.value_ptr.* = std.ArrayList(primitives.StorageKey){};
+                }
                 for (item.storage_keys.items) |key| {
-                    _ = try js.sload(item.address, key);
+                    try gop.value_ptr.*.append(allocator, key);
                 }
             }
+            try js.warmAccessList(map);
         }
 
         // EIP-7702: Apply authorization list (Prague+)
@@ -346,12 +360,15 @@ pub const MainnetHandler = struct {
 
                 // Take checkpoint for top-level CALL: state is reverted through this on failure.
                 const call_checkpoint = ctx.journaled_state.getCheckpoint();
+                // Notify db fallback that a new frame has opened (checkpoint-aware tracking).
+                ctx.journaled_state.database.snapshotFrame();
 
                 // Value transfer for top-level CALL.
                 if (tx.value > 0) {
                     const xfer_err = try ctx.journaled_state.transfer(tx.caller, target, tx.value);
                     if (xfer_err != null) {
                         ctx.journaled_state.checkpointRevert(call_checkpoint);
+                        ctx.journaled_state.database.revertFrame();
                         return main.FrameResult.new(
                             main.ExecutionResult.new(.Fail, exec_gas),
                             0,
@@ -373,6 +390,7 @@ pub const MainnetHandler = struct {
                         .success => |out| {
                             if (out.reverted) {
                                 ctx.journaled_state.checkpointRevert(call_checkpoint);
+                                ctx.journaled_state.database.revertFrame();
                                 return main.FrameResult.new(
                                     main.ExecutionResult.new(.Revert, exec_gas),
                                     0,
@@ -380,6 +398,7 @@ pub const MainnetHandler = struct {
                                 );
                             }
                             ctx.journaled_state.checkpointCommit();
+                            ctx.journaled_state.database.commitFrame();
                             var fr = main.FrameResult.new(
                                 main.ExecutionResult.new(.Success, out.gas_used),
                                 tx_regular_exec_gas - out.gas_used,
@@ -390,6 +409,7 @@ pub const MainnetHandler = struct {
                         },
                         .err => {
                             ctx.journaled_state.checkpointRevert(call_checkpoint);
+                            ctx.journaled_state.database.revertFrame();
                             return main.FrameResult.new(
                                 main.ExecutionResult.new(.Fail, exec_gas),
                                 0,
@@ -422,8 +442,10 @@ pub const MainnetHandler = struct {
 
                 if (ir.raw_result.isSuccess()) {
                     ctx.journaled_state.checkpointCommit();
+                    ctx.journaled_state.database.commitFrame();
                 } else {
                     ctx.journaled_state.checkpointRevert(call_checkpoint);
+                    ctx.journaled_state.database.revertFrame();
                 }
 
                 const status: main.ExecutionStatus = switch (ir.raw_result) {
@@ -552,7 +574,29 @@ pub const MainnetHandler = struct {
         }
 
         // 7. Commit transaction state
+        // Before committing, notify the fallback about storage slots being committed
+        // with a changed value. This lets WitnessDatabase track cross-tx intermediate
+        // writes for EIP-7928 BAL validation (storageChanges vs storageReads).
+        // Must be done BEFORE commitTx() resets original_value = present_value.
+        {
+            var state_it = js.inner.evm_state.iterator();
+            while (state_it.next()) |entry| {
+                // Skip accounts that were both created AND selfdestructed in the same tx:
+                // their storage writes have zero net effect and should not be recorded as
+                // committed changes for EIP-7928 BAL (they become storageReads, not storageChanges).
+                if (entry.value_ptr.status.created and entry.value_ptr.status.self_destructed) continue;
+                var slot_it = entry.value_ptr.storage.iterator();
+                while (slot_it.next()) |slot| {
+                    if (slot.value_ptr.present_value != slot.value_ptr.original_value) {
+                        js.database.notifyStorageSlotCommit(entry.key_ptr.*, slot.key_ptr.*, slot.value_ptr.present_value);
+                    }
+                }
+            }
+        }
         js.commitTx();
+        // Notify fallback database that this transaction committed.
+        // WitnessDatabase uses this to flush per-tx pending tracking to the permanent access log.
+        js.database.commitTracking();
 
         // 8. Update ExecutionResult with final accounting.
         // EIP-7778 (Amsterdam+): block gas does NOT deduct refunds.
@@ -590,6 +634,8 @@ pub const MainnetHandler = struct {
         const ctx = evm.getContext();
         // Revert all state changes from this transaction
         ctx.journaled_state.discardTx();
+        // Notify fallback database that this transaction was discarded.
+        ctx.journaled_state.database.discardTracking();
     }
 };
 
