@@ -336,6 +336,7 @@ pub const Host = struct {
     // -----------------------------------------------------------------------
 
     /// Check whether an address is cold WITHOUT loading it from the database.
+    /// Used to pre-check gas costs before committing to a DB load (EIP-7928 BAL correctness).
     pub fn isAddressCold(self: *Host, addr: primitives.Address) bool {
         return self.js_vtable.isAddressCold(self.js, addr);
     }
@@ -346,16 +347,19 @@ pub const Host = struct {
     }
 
     /// Un-record a pending address access in the database fallback.
+    /// Called when a CALL loaded an address for gas calculation but went OOG.
     pub fn untrackAddress(self: *Host, addr: primitives.Address) void {
         self.js_vtable.untrackAddress(self.js, addr);
     }
 
     /// Force-add an address to the current-tx access log in the database fallback.
+    /// Used for EIP-7702 delegation targets that execute but are not in the witness.
     pub fn forceTrackAddress(self: *Host, addr: primitives.Address) void {
         self.js_vtable.forceTrackAddress(self.js, addr);
     }
 
     /// Check whether an address is already in the EVM state cache.
+    /// Used to avoid un-tracking addresses that were legitimately accessed earlier in the tx.
     pub fn isAddressLoaded(self: *const Host, addr: primitives.Address) bool {
         return self.js_vtable.isAddressLoaded(@constCast(self.js), addr);
     }
