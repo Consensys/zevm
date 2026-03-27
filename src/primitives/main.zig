@@ -110,7 +110,7 @@ pub const MAX_BLOB_NUMBER_PER_TX: usize = 6;
 pub const VERSIONED_HASH_VERSION_KZG: u8 = 0x01;
 
 /// Transaction gas limit cap (EIP-7825)
-pub const TX_GAS_LIMIT_CAP: u64 = 30000000;
+pub const TX_GAS_LIMIT_CAP: u64 = 16777216;
 
 /// EIP-7708: Address that emits synthetic ETH transfer/burn logs (0xff...fe).
 pub const EIP7708_LOG_ADDRESS: Address = [20]u8{
