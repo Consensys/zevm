@@ -284,7 +284,6 @@ pub const InMemoryDB = struct {
 
     pub fn basic(self: *Self, address: primitives.Address) !?state.AccountInfo {
         if (self.accounts.get(address)) |acct| {
-            std.debug.print("DBG InMemoryDB.basic CACHED 0x{s}\n", .{std.fmt.bytesToHex(address, .lower)});
             return acct;
         }
         if (self.fallback) |fb| return fb.basic(fb.ctx, address);
