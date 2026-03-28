@@ -552,8 +552,6 @@ pub const JournalInner = struct {
 
         self.journal.append(alloc_mod.get(), JournalEntryFactory.codeChanged(address)) catch {};
 
-        std.debug.print("DBG setCodeWithHash 0x{s} hash=0x{s}\n", .{ std.fmt.bytesToHex(address, .lower), std.fmt.bytesToHex(hash, .lower) });
-
         account.info.code_hash = hash;
         account.info.code = code;
     }
@@ -985,7 +983,17 @@ pub const JournalInner = struct {
     /// Used by opcode handlers to pre-check gas costs before committing to a DB load.
     pub fn isAddressCold(self: *const JournalInner, address: primitives.Address) bool {
         if (self.evm_state.get(address)) |acct| {
-            return acct.isColdTransactionId(self.transaction_id);
+            if (acct.isColdTransactionId(self.transaction_id)) {
+                // EIP-3651: coinbase is pre-warmed each tx. If the coinbase was loaded in
+                // a previous tx (old transaction_id), still treat it as warm for gas purposes.
+                // Only check the coinbase slot — not precompiles or access-list entries, to
+                // avoid unintended cross-tx warm promotion for those.
+                if (self.warm_addresses.coinbase) |cb| {
+                    if (std.mem.eql(u8, &address, &cb)) return false;
+                }
+                return true;
+            }
+            return false;
         }
         return self.warm_addresses.isCold(address);
     }
