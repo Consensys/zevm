@@ -552,8 +552,6 @@ pub const JournalInner = struct {
 
         self.journal.append(alloc_mod.get(), JournalEntryFactory.codeChanged(address)) catch {};
 
-        std.debug.print("DBG setCodeWithHash 0x{s} hash=0x{s}\n", .{ std.fmt.bytesToHex(address, .lower), std.fmt.bytesToHex(hash, .lower) });
-
         account.info.code_hash = hash;
         account.info.code = code;
     }
