@@ -191,6 +191,7 @@ pub fn opExtcodecopy(ctx: *InstructionContext) void {
     if (size == 0) return;
 
     if (mem_off > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
+        h.untrackAddress(addr);
         ctx.interpreter.halt(.memory_limit_oog);
         return;
     }
@@ -198,6 +199,7 @@ pub fn opExtcodecopy(ctx: *InstructionContext) void {
     const mem_off_u: usize = @intCast(mem_off);
     const size_u: usize = @intCast(size);
     const new_size = std.math.add(usize, mem_off_u, size_u) catch {
+        h.untrackAddress(addr);
         ctx.interpreter.halt(.memory_limit_oog);
         return;
     };
@@ -205,11 +207,13 @@ pub fn opExtcodecopy(ctx: *InstructionContext) void {
     // Dynamic: copy cost
     const num_words = (size_u + 31) / 32;
     if (!ctx.interpreter.gas.spend(gas_costs.G_COPY * @as(u64, @intCast(num_words)))) {
+        h.untrackAddress(addr);
         ctx.interpreter.halt(.out_of_gas);
         return;
     }
 
     if (!expandMemory(ctx, new_size)) {
+        h.untrackAddress(addr);
         ctx.interpreter.halt(.out_of_gas);
         return;
     }
