@@ -144,11 +144,7 @@ fn callImpl(
         }
     }
 
-    // Determine warm/cold access for target address (code source).
-    // Record whether the address was already in the EVM state cache BEFORE this load.
-    // If not already loaded and the full base_cost check later fails (OOG), we untrack
-    // the address — it was loaded only for gas calculation, not for actual execution.
-    const target_already_loaded = h.isAddressLoaded(target_addr);
+    // Load target account info to determine warm/cold access and whether the account exists.
     const acct_info = h.accountInfo(target_addr);
     const is_cold = if (acct_info) |info| info.is_cold else pre_is_cold;
     const transfers_value = has_value and value > 0;
@@ -175,18 +171,21 @@ fn callImpl(
     }
 
     // Base call cost (warm/cold + value transfer + new account + EIP-7702 delegation target access)
-    const base_cost = gas_costs.getCallGasCost(spec, is_cold, transfers_value, account_exists) + delegation_gas;
+    const call_cost_no_delegation = gas_costs.getCallGasCost(spec, is_cold, transfers_value, account_exists);
+    const base_cost = call_cost_no_delegation + delegation_gas;
 
     // Determine forwarded gas (EIP-150 introduces 63/64 rule; pre-EIP-150 uses all remaining).
     const remaining = ctx.interpreter.gas.remaining;
+    if (remaining < call_cost_no_delegation) {
+        // OOG before the target was "accessed" in EIP-7928 terms (can't pay transfer/new-account).
+        // Per EELS: target is not yet in accessed_addresses at this point → untrack it.
+        h.untrackAddress(target_addr);
+        ctx.interpreter.halt(.out_of_gas);
+        return;
+    }
     if (remaining < base_cost) {
-        // The CALL goes OOG before executing. Un-track the target only when it was
-        // loaded purely for new_account_cost gas estimation (non-existing account with
-        // value transfer). Existing accounts (including 7702 sources with delegation_gas
-        // in base_cost) remain in the BAL — they were genuinely accessed.
-        if (!target_already_loaded and transfers_value and !account_exists) {
-            h.untrackAddress(target_addr);
-        }
+        // OOG after target access but before delegation (oog_after_target_access /
+        // oog_success_minus_1). Per EELS second check_gas: target IS in BAL, delegation NOT loaded.
         ctx.interpreter.halt(.out_of_gas);
         return;
     }

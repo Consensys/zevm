@@ -253,6 +253,10 @@ pub const FallbackFns = struct {
     /// lightweight hook lets the fallback (e.g. WitnessDatabase) record the access for
     /// EIP-7928 BAL tracking without performing MPT verification.
     notify_storage_read: ?*const fn (*anyopaque, primitives.Address, primitives.StorageKey) void = null,
+    /// Returns true if the address was committed to the permanent access log.
+    /// Used by BaTracker to distinguish legitimately-accessed nonexistent accounts
+    /// from those only loaded for OOG gas calculation.
+    is_tracked_address: ?*const fn (*anyopaque, primitives.Address) bool = null,
 };
 
 /// In-memory database implementation.
@@ -263,6 +267,10 @@ pub const InMemoryDB = struct {
     block_hashes: std.AutoHashMap(u64, primitives.Hash),
     /// Optional fallback: called on cache miss for account/storage/code/blockHash.
     fallback: ?FallbackFns = null,
+    /// Addresses that were explicitly OOG-untracked via untrackAddress().
+    /// Used by BaTracker.computeHash() to exclude CALL gas-calc phantoms from the BAL.
+    /// Populated by untrackAddress(); never cleared between transactions (block-scoped).
+    oog_addresses: std.AutoHashMap(primitives.Address, void),
 
     const Self = @This();
 
@@ -272,6 +280,7 @@ pub const InMemoryDB = struct {
             .code = std.AutoHashMap(primitives.Hash, bytecode.Bytecode).init(allocator),
             .storage_map = std.HashMap(struct { primitives.Address, primitives.StorageKey }, primitives.StorageValue, StorageKeyContext, std.hash_map.default_max_load_percentage).init(allocator),
             .block_hashes = std.AutoHashMap(u64, primitives.Hash).init(allocator),
+            .oog_addresses = std.AutoHashMap(primitives.Address, void).init(allocator),
         };
     }
 
@@ -280,6 +289,7 @@ pub const InMemoryDB = struct {
         self.code.deinit();
         self.storage_map.deinit();
         self.block_hashes.deinit();
+        self.oog_addresses.deinit();
     }
 
     pub fn basic(self: *Self, address: primitives.Address) !?state.AccountInfo {
@@ -339,10 +349,18 @@ pub const InMemoryDB = struct {
         if (self.fallback) |fb| if (fb.revert_frame) |f| f(fb.ctx);
     }
 
-    /// Un-record a pending address access in the fallback.
+    /// Un-record a pending address access.
     /// Called when a CALL loaded an address for gas calculation but then went OOG.
+    /// Marks the address as an OOG phantom so BaTracker can exclude it from the BAL.
     pub fn untrackAddress(self: *Self, address: primitives.Address) void {
+        self.oog_addresses.put(address, {}) catch {};
         if (self.fallback) |fb| if (fb.untrack_address) |f| f(fb.ctx, address);
+    }
+
+    /// Returns true if the address was OOG-untracked (loaded only for CALL gas calculation).
+    /// Used by BaTracker.computeHash() to exclude phantom accounts from the BAL.
+    pub fn isOogAddress(self: *const Self, address: primitives.Address) bool {
+        return self.oog_addresses.contains(address);
     }
 
     /// Force-add an address to the current-tx access log regardless of witness state.
@@ -363,6 +381,14 @@ pub const InMemoryDB = struct {
     /// lets the fallback record the access for EIP-7928 BAL tracking.
     pub fn notifyStorageRead(self: *Self, address: primitives.Address, slot: primitives.StorageKey) void {
         if (self.fallback) |fb| if (fb.notify_storage_read) |f| f(fb.ctx, address, slot);
+    }
+
+    /// Returns true if the address was committed to the permanent access log in the fallback.
+    /// Used by BaTracker to distinguish legitimately-accessed nonexistent accounts
+    /// from those only loaded for OOG gas calculation.
+    pub fn isTrackedAddress(self: *Self, address: primitives.Address) bool {
+        if (self.fallback) |fb| if (fb.is_tracked_address) |f| return f(fb.ctx, address);
+        return false;
     }
 
     pub fn basicRef(self: Self, address: primitives.Address) !?state.AccountInfo {
