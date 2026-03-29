@@ -144,11 +144,7 @@ fn callImpl(
         }
     }
 
-    // Determine warm/cold access for target address (code source).
-    // Record whether the address was already in the EVM state cache BEFORE this load.
-    // If not already loaded and the full base_cost check later fails (OOG), we untrack
-    // the address — it was loaded only for gas calculation, not for actual execution.
-    const target_already_loaded = h.isAddressLoaded(target_addr);
+    // Load target account info to determine warm/cold access and whether the account exists.
     const acct_info = h.accountInfo(target_addr);
     const is_cold = if (acct_info) |info| info.is_cold else pre_is_cold;
     const transfers_value = has_value and value > 0;
@@ -188,13 +184,8 @@ fn callImpl(
         return;
     }
     if (remaining < base_cost) {
-        // The CALL goes OOG before executing. Un-track the target only when it was
-        // loaded purely for new_account_cost gas estimation (non-existing account with
-        // value transfer). Existing accounts (including 7702 sources with delegation_gas
-        // in base_cost) remain in the BAL — they were genuinely accessed.
-        if (!target_already_loaded and transfers_value and !account_exists) {
-            h.untrackAddress(target_addr);
-        }
+        // OOG after target access but before delegation (oog_after_target_access /
+        // oog_success_minus_1). Per EELS second check_gas: target IS in BAL, delegation NOT loaded.
         ctx.interpreter.halt(.out_of_gas);
         return;
     }
