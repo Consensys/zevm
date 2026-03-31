@@ -93,15 +93,20 @@ pub fn makeSwapFn(comptime n: u8) InstructionFn {
 }
 
 /// DUPN (0xE6): Duplicate item at depth n from top (EIP-8024, Amsterdam+).
-/// Reads 1 immediate byte `imm`. Depth n = (imm + 145) % 256 (1-indexed for dupUnsafe).
+/// Reads 1 immediate byte `imm`. Valid range: 0..=90 or 128..=255 (91..=127 → exceptional halt).
+/// Depth n = decode_single(imm) = (imm + 145) % 256, with 17 <= n <= 235.
 /// Gas: 3 (G_VERYLOW, charged by dispatch).
 pub fn opDupN(ctx: *InstructionContext) void {
     const stack = &ctx.interpreter.stack;
     const imm = ctx.interpreter.bytecode.readImmediates(1)[0];
     ctx.interpreter.bytecode.relativeJump(1);
+    // EIP-8024: immediates 91..=127 (0x5B..=0x7F) are invalid per decode_single.
+    if (imm > 90 and imm < 128) {
+        ctx.interpreter.halt(.invalid_opcode);
+        return;
+    }
     const n: usize = (@as(usize, imm) + 145) % 256;
-    // n == 0 or n <= 16: depth 0 is invalid, depths 1-16 overlap DUP1-DUP16 (also invalid for DUPN).
-    if (n <= 16 or !stack.hasItems(n)) {
+    if (!stack.hasItems(n)) {
         ctx.interpreter.halt(.stack_underflow);
         return;
     }
@@ -113,12 +118,18 @@ pub fn opDupN(ctx: *InstructionContext) void {
 }
 
 /// SWAPN (0xE7): Swap top with item at 0-indexed depth n (EIP-8024, Amsterdam+).
-/// Reads 1 immediate byte `imm`. Depth n = (imm + 145) % 256.
+/// Reads 1 immediate byte `imm`. Valid range: 0..=90 or 128..=255 (91..=127 → exceptional halt).
+/// Depth n = decode_single(imm) = (imm + 145) % 256, with 17 <= n <= 235.
 /// Gas: 3 (G_VERYLOW, charged by dispatch).
 pub fn opSwapN(ctx: *InstructionContext) void {
     const stack = &ctx.interpreter.stack;
     const imm = ctx.interpreter.bytecode.readImmediates(1)[0];
     ctx.interpreter.bytecode.relativeJump(1);
+    // EIP-8024: immediates 91..=127 (0x5B..=0x7F) are invalid per decode_single.
+    if (imm > 90 and imm < 128) {
+        ctx.interpreter.halt(.invalid_opcode);
+        return;
+    }
     const n: usize = (@as(usize, imm) + 145) % 256;
     if (!stack.hasItems(n + 1)) {
         ctx.interpreter.halt(.stack_underflow);

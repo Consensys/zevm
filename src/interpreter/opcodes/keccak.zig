@@ -36,8 +36,18 @@ pub fn opKeccak256(ctx: *InstructionContext) void {
     }
     const offset_usize: usize = if (length_usize == 0) 0 else @intCast(offset);
 
-    // Dynamic: word cost
-    const num_words: u64 = (length_usize + 31) / 32;
+    // Compute end = offset + length before word-cost so a huge length is caught early.
+    const end = if (length_usize > 0)
+        std.math.add(usize, offset_usize, length_usize) catch {
+            ctx.interpreter.halt(.memory_limit_oog);
+            return;
+        }
+    else
+        offset_usize;
+
+    // Dynamic: word cost — std.math.divCeil avoids (length + 31) overflow when
+    // length_usize is near maxInt(usize) (e.g. from GASLIMIT with maxInt gas limit).
+    const num_words: u64 = @intCast(std.math.divCeil(usize, length_usize, 32) catch unreachable);
     const word_cost = gas_costs.G_KECCAK256WORD * num_words;
     if (!ctx.interpreter.gas.spend(word_cost)) {
         ctx.interpreter.halt(.out_of_gas);
@@ -45,13 +55,10 @@ pub fn opKeccak256(ctx: *InstructionContext) void {
     }
 
     // Dynamic: memory expansion
-    const end = std.math.add(usize, offset_usize, length_usize) catch {
-        ctx.interpreter.halt(.memory_limit_oog);
-        return;
-    };
     if (length_usize > 0) {
         const current_words = (ctx.interpreter.memory.size() + 31) / 32;
-        const new_words = (end + 31) / 32;
+        // std.math.divCeil avoids (end + 31) overflow when end is near maxInt(usize).
+        const new_words = std.math.divCeil(usize, end, 32) catch unreachable;
         if (new_words > current_words) {
             const expansion_cost = memoryCostWords(new_words) - memoryCostWords(current_words);
             if (!ctx.interpreter.gas.spend(expansion_cost)) {
@@ -59,7 +66,7 @@ pub fn opKeccak256(ctx: *InstructionContext) void {
                 return;
             }
         }
-        const aligned_end = ((end + 31) / 32) * 32;
+        const aligned_end = new_words * 32;
         if (aligned_end > ctx.interpreter.memory.size()) {
             const old_size = ctx.interpreter.memory.size();
             ctx.interpreter.memory.buffer.resize(alloc_mod.get(), aligned_end) catch {
