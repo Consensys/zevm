@@ -225,6 +225,7 @@ pub const SELFBALANCE: u8 = 0x47;
 pub const BASEFEE: u8 = 0x48;
 pub const BLOBHASH: u8 = 0x49;
 pub const BLOBBASEFEE: u8 = 0x4A;
+pub const SLOTNUM: u8 = 0x4B;
 pub const DUPN: u8 = 0xE6;
 pub const SWAPN: u8 = 0xE7;
 pub const EXCHANGE: u8 = 0xE8;
@@ -390,6 +391,7 @@ pub const OPCODE_INFO: [256]?OpCodeInfo = blk: {
     map[BASEFEE] = OpCodeInfo{ .name = "BASEFEE", .inputs = 0, .outputs = 1, .immediate_size = 0, .terminating = false };
     map[BLOBHASH] = OpCodeInfo{ .name = "BLOBHASH", .inputs = 1, .outputs = 1, .immediate_size = 0, .terminating = false };
     map[BLOBBASEFEE] = OpCodeInfo{ .name = "BLOBBASEFEE", .inputs = 0, .outputs = 1, .immediate_size = 0, .terminating = false };
+    map[SLOTNUM] = OpCodeInfo{ .name = "SLOTNUM", .inputs = 0, .outputs = 1, .immediate_size = 0, .terminating = false };
 
     // Stack operations
     map[POP] = OpCodeInfo{ .name = "POP", .inputs = 1, .outputs = 0, .immediate_size = 0, .terminating = false };

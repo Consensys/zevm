@@ -88,6 +88,7 @@ pub const opChainid = environment.opChainid;
 pub const opBasefee = environment.opBasefee;
 pub const opBlobhash = environment.opBlobhash;
 pub const opBlobbasefee = environment.opBlobbasefee;
+pub const opSlotnum = environment.opSlotnum;
 
 // Host-requiring opcodes (account state, storage, logs, selfdestruct)
 pub const host_ops = @import("host_ops.zig");

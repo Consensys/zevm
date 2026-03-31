@@ -260,6 +260,8 @@ fn applyAmsterdamChanges(table: *InstructionTable) void {
     table[bytecode_mod.DUPN] = entry(opcodes.opDupN, gas_costs.G_VERYLOW);
     table[bytecode_mod.SWAPN] = entry(opcodes.opSwapN, gas_costs.G_VERYLOW);
     table[bytecode_mod.EXCHANGE] = entry(opcodes.opExchange, gas_costs.G_VERYLOW);
+    // EIP-7843: SLOTNUM opcode — push beacon chain slot number
+    table[bytecode_mod.SLOTNUM] = entry(opcodes.opSlotnum, gas_costs.G_BASE);
 }
 
 // ---------------------------------------------------------------------------
