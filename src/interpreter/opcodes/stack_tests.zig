@@ -426,7 +426,7 @@ test "EXCHANGE: valid imm=0 swaps depths 1 and 2" {
     // stack[top-1] and stack[top-15] should be swapped; top unchanged
     try expectEqual(@as(U, 0xBBBB), interp.stack.peekUnsafe(0)); // top unchanged
     try expectEqual(@as(U, 0xAAAA), interp.stack.peekUnsafe(1)); // was depth 15, now depth 1
-    try expectEqual(@as(U, 14), interp.stack.peekUnsafe(15));    // was depth 1 (value 14), now depth 15
+    try expectEqual(@as(U, 14), interp.stack.peekUnsafe(15)); // was depth 1 (value 14), now depth 15
 }
 
 test "EXCHANGE: invalid imm=82 halts with invalid_opcode" {
