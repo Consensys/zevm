@@ -159,7 +159,7 @@ pub fn opExtcodecopy(ctx: *InstructionContext) void {
         }
         const mem_off_u: usize = @intCast(mem_off);
         const size_u: usize = @intCast(size);
-        const num_words = (size_u + 31) / 32;
+        const num_words = std.math.divCeil(usize, size_u, 32) catch unreachable;
         if (!ctx.interpreter.gas.spend(gas_costs.G_COPY * @as(u64, @intCast(num_words)))) {
             ctx.interpreter.halt(.out_of_gas);
             return;
@@ -199,8 +199,8 @@ pub fn opExtcodecopy(ctx: *InstructionContext) void {
         return;
     };
 
-    // Dynamic: copy cost
-    const num_words = (size_u + 31) / 32;
+    // Dynamic: copy cost — use divCeil to avoid (size + 31) overflow when size = maxInt(usize)
+    const num_words = std.math.divCeil(usize, size_u, 32) catch unreachable;
     if (!ctx.interpreter.gas.spend(gas_costs.G_COPY * @as(u64, @intCast(num_words)))) {
         ctx.interpreter.halt(.out_of_gas);
         return;

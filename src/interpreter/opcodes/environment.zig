@@ -140,8 +140,8 @@ pub fn opCalldatacopy(ctx: *InstructionContext) void {
         return;
     };
 
-    // Dynamic: copy cost
-    const num_words = (size_usize + 31) / 32;
+    // Dynamic: copy cost — use divCeil to avoid (size + 31) overflow when size = maxInt(usize)
+    const num_words = std.math.divCeil(usize, size_usize, 32) catch unreachable;
     const copy_cost: u64 = gas_costs.G_COPY * @as(u64, @intCast(num_words));
     if (!ctx.interpreter.gas.spend(copy_cost)) {
         ctx.interpreter.halt(.out_of_gas);
@@ -211,8 +211,8 @@ pub fn opCodecopy(ctx: *InstructionContext) void {
         return;
     };
 
-    // Dynamic: copy cost
-    const num_words = (size_usize + 31) / 32;
+    // Dynamic: copy cost — use divCeil to avoid (size + 31) overflow when size = maxInt(usize)
+    const num_words = std.math.divCeil(usize, size_usize, 32) catch unreachable;
     const copy_cost: u64 = gas_costs.G_COPY * @as(u64, @intCast(num_words));
     if (!ctx.interpreter.gas.spend(copy_cost)) {
         ctx.interpreter.halt(.out_of_gas);
@@ -303,8 +303,8 @@ pub fn opReturndatacopy(ctx: *InstructionContext) void {
         return;
     };
 
-    // Dynamic: copy cost
-    const num_words = (size_usize + 31) / 32;
+    // Dynamic: copy cost — use divCeil to avoid (size + 31) overflow when size = maxInt(usize)
+    const num_words = std.math.divCeil(usize, size_usize, 32) catch unreachable;
     const copy_cost: u64 = gas_costs.G_COPY * @as(u64, @intCast(num_words));
     if (!ctx.interpreter.gas.spend(copy_cost)) {
         ctx.interpreter.halt(.out_of_gas);
