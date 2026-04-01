@@ -495,9 +495,6 @@ pub const OPCODE_INFO: [256]?OpCodeInfo = blk: {
     map[CREATE] = OpCodeInfo{ .name = "CREATE", .inputs = 3, .outputs = 1, .immediate_size = 0, .terminating = false };
     map[CALL] = OpCodeInfo{ .name = "CALL", .inputs = 7, .outputs = 1, .immediate_size = 0, .terminating = false };
     map[CALLCODE] = OpCodeInfo{ .name = "CALLCODE", .inputs = 7, .outputs = 1, .immediate_size = 0, .terminating = false };
-    map[DUPN] = OpCodeInfo{ .name = "DUPN", .inputs = 0, .outputs = 1, .immediate_size = 1, .terminating = false };
-    map[SWAPN] = OpCodeInfo{ .name = "SWAPN", .inputs = 0, .outputs = 0, .immediate_size = 1, .terminating = false };
-    map[EXCHANGE] = OpCodeInfo{ .name = "EXCHANGE", .inputs = 0, .outputs = 0, .immediate_size = 1, .terminating = false };
     map[RETURN] = OpCodeInfo{ .name = "RETURN", .inputs = 2, .outputs = 0, .immediate_size = 0, .terminating = true };
     map[DELEGATECALL] = OpCodeInfo{ .name = "DELEGATECALL", .inputs = 6, .outputs = 1, .immediate_size = 0, .terminating = false };
     map[CREATE2] = OpCodeInfo{ .name = "CREATE2", .inputs = 4, .outputs = 1, .immediate_size = 0, .terminating = false };
