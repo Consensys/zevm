@@ -247,7 +247,7 @@ pub fn runTestCase(tc: types.TestCase, allocator: std.mem.Allocator) TestOutcome
     // Set block env
     const blob_excess_gas_and_price: ?context.BlobExcessGasAndPrice =
         if (tc.blob_versioned_hashes_count > 0 or tc.excess_blob_gas > 0)
-            context.BlobExcessGasAndPrice.new(tc.excess_blob_gas, primitives.BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE)
+            context.BlobExcessGasAndPrice.new(tc.excess_blob_gas, ctx.cfg.blobBaseFeeUpdateFraction())
         else
             null;
     ctx.setBlock(context.BlockEnv{
