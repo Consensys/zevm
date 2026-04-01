@@ -348,11 +348,11 @@ pub const CfgEnv = struct {
     /// - Cancun:  3338477 (`BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN`)
     pub fn blobBaseFeeUpdateFraction(self: CfgEnv) u64 {
         return self.blob_base_fee_update_fraction orelse
-            if (self.spec.isEnabledIn(.bpo2))
+            if (primitives.isEnabledIn(self.spec, .bpo2))
                 primitives.BLOB_BASE_FEE_UPDATE_FRACTION_BPO2
-            else if (self.spec.isEnabledIn(.bpo1))
+            else if (primitives.isEnabledIn(self.spec, .bpo1))
                 primitives.BLOB_BASE_FEE_UPDATE_FRACTION_BPO1
-            else if (self.spec.isEnabledIn(.prague))
+            else if (primitives.isEnabledIn(self.spec, .prague))
                 primitives.BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE
             else
                 primitives.BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN;

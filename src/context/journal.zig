@@ -272,6 +272,23 @@ pub const WarmAddresses = struct {
 pub const JournalCheckpoint = struct {
     log_i: usize,
     journal_i: usize,
+    /// Index into JournalInner.pending_burns at checkpoint time (for EIP-7708 revert).
+    burn_i: usize,
+};
+
+/// EIP-7708 deferred burn entry.
+///
+/// Tracks an account in `accounts_to_delete` that may receive ETH after its SELFDESTRUCT opcode
+/// executes and before the transaction finalizes (e.g. a payer contract calling into the already-
+/// destructed address, or the coinbase receiving its priority fee).  These accounts are added to
+/// `pending_burns` at SELFDESTRUCT time; `emitBurnLogs()` re-reads their balance after the
+/// coinbase payment and emits a Burn log for any non-zero remainder.
+///
+/// `amount` is unused — it is kept for potential future use (e.g. assertions) but the finalization
+/// path always reads the live balance from `evm_state`.
+pub const PendingBurn = struct {
+    address: primitives.Address,
+    amount: primitives.U256,
 };
 
 /// State load result
@@ -381,6 +398,9 @@ pub const JournalInner = struct {
     spec: primitives.SpecId,
     /// Warm addresses containing both coinbase and current precompiles.
     warm_addresses: WarmAddresses,
+    /// EIP-7708: pending burn entries for same-tx-created accounts that selfdestructed to self.
+    /// Emitted as Burn logs at postExecution, sorted by address. Checkpointed via burn_i.
+    pending_burns: std.ArrayList(PendingBurn),
 
     pub fn new() JournalInner {
         return .{
@@ -391,6 +411,7 @@ pub const JournalInner = struct {
             .transaction_id = 0,
             .spec = primitives.SpecId.prague,
             .warm_addresses = WarmAddresses.new(),
+            .pending_burns = std.ArrayList(PendingBurn){},
         };
     }
 
@@ -401,6 +422,7 @@ pub const JournalInner = struct {
         self.logs.deinit(alloc_mod.get());
         self.journal.deinit(alloc_mod.get());
         self.warm_addresses.deinit();
+        self.pending_burns.deinit(alloc_mod.get());
     }
 
     /// Returns the logs
@@ -439,6 +461,7 @@ pub const JournalInner = struct {
         // Free heap-allocated data/topics (in case takeLogs() was not called — e.g. failed tx)
         for (self.logs.items) |log| log.deinit(alloc_mod.get());
         self.logs.clearRetainingCapacity();
+        self.pending_burns.clearRetainingCapacity();
     }
 
     /// Discard the current transaction, by reverting the journal entries and incrementing the transaction id.
@@ -457,6 +480,7 @@ pub const JournalInner = struct {
         // Free heap-allocated data/topics before clearing the log list
         for (self.logs.items) |log| log.deinit(alloc_mod.get());
         self.logs.clearRetainingCapacity();
+        self.pending_burns.clearRetainingCapacity();
         self.transaction_id += 1;
         self.warm_addresses.clearCoinbaseAndAccessList();
     }
@@ -472,6 +496,7 @@ pub const JournalInner = struct {
         self.evm_state = state.EvmState.init(alloc_mod.get());
         for (self.logs.items) |log| log.deinit(alloc_mod.get());
         self.logs.clearRetainingCapacity();
+        self.pending_burns.clearRetainingCapacity();
         self.transient_storage.clearRetainingCapacity();
         self.journal.clearRetainingCapacity();
         self.transaction_id = 0;
@@ -693,6 +718,7 @@ pub const JournalInner = struct {
         return JournalCheckpoint{
             .log_i = self.logs.items.len,
             .journal_i = self.journal.items.len,
+            .burn_i = self.pending_burns.items.len,
         };
     }
 
@@ -707,6 +733,8 @@ pub const JournalInner = struct {
         // Free heap-allocated data/topics of logs being discarded by this revert.
         for (self.logs.items[checkpoint.log_i..]) |log| log.deinit(alloc_mod.get());
         self.logs.shrinkRetainingCapacity(checkpoint.log_i);
+        // Revert EIP-7708 pending burns added since this checkpoint.
+        self.pending_burns.shrinkRetainingCapacity(checkpoint.burn_i);
 
         // iterate over last N journals sets and revert our global evm_state
         if (checkpoint.journal_i < self.journal.items.len) {
@@ -726,6 +754,104 @@ pub const JournalInner = struct {
     /// current spec enables Cancun, this happens only when the account associated to address
     /// is created in the same tx
     ///
+    // ─── EIP-7708 helpers ─────────────────────────────────────────────────────────
+
+    /// EIP-7708: Build and append a Transfer(from, to, amount) log to the journal log list.
+    /// Address is encoded into the upper 12 zero-padded bytes of a 32-byte topic.
+    /// OOM silently skips the log (same policy as addLog).
+    fn addEip7708TransferLog(self: *JournalInner, from: primitives.Address, to: primitives.Address, amount: primitives.U256) void {
+        const alloc = alloc_mod.get();
+        const topics = alloc.alloc(primitives.Hash, 3) catch return;
+        topics[0] = primitives.EIP7708_TRANSFER_TOPIC;
+        topics[1] = std.mem.zeroes([32]u8);
+        @memcpy(topics[1][12..], &from);
+        topics[2] = std.mem.zeroes([32]u8);
+        @memcpy(topics[2][12..], &to);
+        const data = alloc.alloc(u8, 32) catch {
+            alloc.free(topics);
+            return;
+        };
+        const amount_bytes: [32]u8 = @bitCast(@byteSwap(amount));
+        @memcpy(data, &amount_bytes);
+        self.addLog(.{
+            .address = primitives.EIP7708_LOG_ADDRESS,
+            .topics = topics,
+            .data = data,
+        });
+    }
+
+    /// EIP-7708: Build and append a Burn(address, amount) log to the journal log list.
+    fn addEip7708BurnLog(self: *JournalInner, addr: primitives.Address, amount: primitives.U256) void {
+        const alloc = alloc_mod.get();
+        const topics = alloc.alloc(primitives.Hash, 2) catch return;
+        topics[0] = primitives.EIP7708_BURN_TOPIC;
+        topics[1] = std.mem.zeroes([32]u8);
+        @memcpy(topics[1][12..], &addr);
+        const data = alloc.alloc(u8, 32) catch {
+            alloc.free(topics);
+            return;
+        };
+        const amount_bytes: [32]u8 = @bitCast(@byteSwap(amount));
+        @memcpy(data, &amount_bytes);
+        self.addLog(.{
+            .address = primitives.EIP7708_LOG_ADDRESS,
+            .topics = topics,
+            .data = data,
+        });
+    }
+
+    /// EIP-7708: Register an account for a deferred finalization burn check.
+    ///
+    /// Called at SELFDESTRUCT time for every account entering `accounts_to_delete` (i.e. same-tx-
+    /// created accounts under Cancun+, or any account pre-Cancun).  `amount` is stored but not
+    /// used by `emitBurnLogs()`; pass 0.  The entry is checkpointed so it can be reverted if the
+    /// enclosing call frame reverts.
+    fn addPendingBurn(self: *JournalInner, addr: primitives.Address, amount: primitives.U256) void {
+        self.pending_burns.append(alloc_mod.get(), .{ .address = addr, .amount = amount }) catch {};
+    }
+
+    /// EIP-7708 finalization: emit deferred Burn logs for accounts that received ETH after their
+    /// SELFDESTRUCT opcode executed.
+    ///
+    /// # When this is called
+    /// `postExecution` in `mainnet_builder.zig` calls this after the coinbase priority-fee payment
+    /// and before `takeLogs()` collects the tx log list.  This matches the EELS ordering in
+    /// `process_transaction` (amsterdam/fork.py): miner fee is transferred first, then for each
+    /// address in `accounts_to_delete` the current balance is checked and a Burn log is emitted
+    /// if non-zero.
+    ///
+    /// # Why two Burn logs can appear for the same address
+    /// The SELFDESTRUCT opcode itself emits a Burn log for the balance held *at that moment*
+    /// (see the `addEip7708BurnLog` call in `selfdestruct()`).  The account's `evm_state` balance
+    /// is then zeroed.  Any ETH that arrives afterwards — a payer's CALL sending value, or the
+    /// coinbase receiving its priority fee — accumulates back in `evm_state`.  This second pass
+    /// emits a *separate* Burn log only for that post-SELFDESTRUCT ETH, producing two distinct
+    /// log entries exactly as the EELS reference implementation does.
+    ///
+    /// # Sorting
+    /// Logs are emitted in ascending address order (lexicographic bytes), matching EELS.
+    pub fn emitBurnLogs(self: *JournalInner) void {
+        if (self.pending_burns.items.len == 0) return;
+        std.mem.sort(PendingBurn, self.pending_burns.items, {}, struct {
+            fn lessThan(_: void, a: PendingBurn, b: PendingBurn) bool {
+                return std.mem.order(u8, &a.address, &b.address) == .lt;
+            }
+        }.lessThan);
+        for (self.pending_burns.items) |burn| {
+            // The account's `evm_state` balance was zeroed when SELFDESTRUCT executed.
+            // Any non-zero balance here is ETH that arrived *after* the opcode (e.g. a
+            // subsequent CALL with value from a payer, or the coinbase priority fee).
+            const finalization_balance = if (self.evm_state.get(burn.address)) |acct|
+                acct.info.balance
+            else
+                0;
+            if (finalization_balance > 0) self.addEip7708BurnLog(burn.address, finalization_balance);
+        }
+        self.pending_burns.clearRetainingCapacity();
+    }
+
+    // ─── Selfdestruct ──────────────────────────────────────────────────────────────
+
     /// # References:
     ///  * <https://github.com/ethereum/go-ethereum/blob/141cd425310b503c5678e674a8c3872cf46b7086/core/vm/instructions.go#L832-L833>
     ///  * <https://github.com/ethereum/go-ethereum/blob/141cd425310b503c5678e674a8c3872cf46b7086/core/evm_state/evm_statedb.go#L449>
@@ -778,6 +904,55 @@ pub const JournalInner = struct {
 
         if (journal_entry) |entry| {
             self.journal.append(alloc_mod.get(), entry) catch {};
+        }
+
+        // ── EIP-7708 (Amsterdam+): ETH transfer / burn log emission ─────────────────
+        //
+        // EIP-7708 requires a LOG2 event for every wei movement that would otherwise be
+        // invisible on-chain.  There are two distinct moments where logs must be emitted:
+        //
+        //  1. **Opcode time** — when SELFDESTRUCT executes:
+        //       • SELFDESTRUCT to a *different* beneficiary: the ETH is moved now, so a
+        //         Transfer log is emitted immediately (LOG3 with from/to/amount).
+        //       • SELFDESTRUCT to *self* (same-tx-created or pre-Cancun): the ETH is
+        //         destroyed now, so a Burn log is emitted immediately (LOG2 with addr/amount).
+        //         The account's `evm_state` balance is then zeroed by `entry_blk` above.
+        //
+        //  2. **Finalization time** — after the coinbase priority-fee payment:
+        //       Any account in `accounts_to_delete` (same-tx-created SELFDESTRUCTs) may
+        //       receive ETH *after* the opcode executes but *before* the tx commits — for
+        //       example a payer contract calling into the already-destructed address, or
+        //       the coinbase receiving its miner tip.  A second Burn log is emitted for
+        //       this post-opcode ETH via `emitBurnLogs()` in `postExecution`.
+        //
+        // Only accounts in `accounts_to_delete` (isCreatedLocally || pre-Cancun) are
+        // eligible for the finalization burn; pre-existing Cancun+ self-destructed accounts
+        // are a no-op (no state change, no log).
+        //
+        // Reference: ethereum/execution-specs — amsterdam/vm/instructions/system.py
+        //            (selfdestruct) and amsterdam/fork.py (process_transaction finalization).
+        if (primitives.isEnabledIn(self.spec, .amsterdam)) {
+            if (!std.mem.eql(u8, &address, &target)) {
+                // Case 1a: SELFDESTRUCT to a different beneficiary.
+                // Emit Transfer log immediately for the ETH moved by `entry_blk` above.
+                if (balance > 0) self.addEip7708TransferLog(address, target, balance);
+                // If this account is also in `accounts_to_delete`, register it for the
+                // finalization burn check: a payer may still send ETH to this address
+                // within the same transaction after the opcode returns.
+                if (acc.isCreatedLocally() or !is_cancun_enabled) {
+                    self.addPendingBurn(address, 0);
+                }
+            } else if (acc.isCreatedLocally() or !is_cancun_enabled) {
+                // Case 1b: SELFDESTRUCT to self (same-tx-created or pre-Cancun).
+                // Emit Burn log immediately for the ETH destroyed right now, then register
+                // for the finalization burn check so that any ETH arriving *after* this
+                // opcode (payer call, coinbase priority fee) also gets a Burn log.
+                // The two logs are intentionally separate, matching the EELS reference.
+                if (balance > 0) self.addEip7708BurnLog(address, balance);
+                self.addPendingBurn(address, 0);
+            }
+            // Case 2: SELFDESTRUCT to self on a pre-existing account (Cancun+).
+            // EIP-6780 makes this a no-op — state is unchanged, no log is emitted.
         }
 
         return StateLoad(SelfDestructResult).new(SelfDestructResult{
@@ -1156,6 +1331,18 @@ pub fn Journal(comptime DB: type) type {
 
         pub fn takeLogs(self: *@This()) std.ArrayList(primitives.Log) {
             return self.inner.takeLogs();
+        }
+
+        /// EIP-7708: Emit a Transfer log (Amsterdam+). Caller must already have verified
+        /// that `from != to` and `amount > 0` and that the spec is Amsterdam or later.
+        pub fn emitTransferLog(self: *@This(), from: primitives.Address, to: primitives.Address, amount: primitives.U256) void {
+            self.inner.addEip7708TransferLog(from, to, amount);
+        }
+
+        /// EIP-7708: Sort and emit pending burn logs into the log list.
+        /// Call after coinbase payment and before takeLogs() in postExecution.
+        pub fn emitBurnLogs(self: *@This()) void {
+            self.inner.emitBurnLogs();
         }
 
         pub fn commitTx(self: *@This()) void {
