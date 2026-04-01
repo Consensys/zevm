@@ -284,15 +284,20 @@ pub const Memory = struct {
             return 0;
         }
 
-        const new_words = (new_size + 31) / 32;
-        const current_words = (self.buffer.items.len + 31) / 32;
+        // std.math.divCeil avoids (n + 31) overflow when n is near maxInt(usize).
+        const new_words = std.math.divCeil(usize, new_size, 32) catch return std.math.maxInt(u64);
+        const current_words = std.math.divCeil(usize, self.buffer.items.len, 32) catch return std.math.maxInt(u64);
 
         if (new_words <= current_words) {
             return 0;
         }
 
-        const cost = (new_words * new_words) / 512 + (3 * new_words);
-        const current_cost = (current_words * current_words) / 512 + (3 * current_words);
+        const n: u64 = @intCast(new_words);
+        const c: u64 = @intCast(current_words);
+        const sq_n = std.math.mul(u64, n, n) catch return std.math.maxInt(u64);
+        const cost = std.math.add(u64, sq_n / 512, 3 * n) catch return std.math.maxInt(u64);
+        const sq_c = std.math.mul(u64, c, c) catch return std.math.maxInt(u64);
+        const current_cost = std.math.add(u64, sq_c / 512, 3 * c) catch return std.math.maxInt(u64);
 
         return cost - current_cost;
     }

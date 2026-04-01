@@ -199,15 +199,18 @@ pub const MemoryGas = struct {
             return 0;
         }
 
-        const new_words = (new_size + 31) / 32;
-        const current_words = (self.size + 31) / 32;
+        // std.math.divCeil(u64, n, 32) avoids (n + 31) overflow for large n.
+        const new_words = std.math.divCeil(u64, new_size, 32) catch return std.math.maxInt(u64);
+        const current_words = std.math.divCeil(u64, self.size, 32) catch return std.math.maxInt(u64);
 
         if (new_words <= current_words) {
             return 0;
         }
 
-        const cost = (new_words * new_words) / 512 + (3 * new_words);
-        const current_cost = (current_words * current_words) / 512 + (3 * current_words);
+        const sq_new = std.math.mul(u64, new_words, new_words) catch return std.math.maxInt(u64);
+        const cost = std.math.add(u64, sq_new / 512, 3 * new_words) catch return std.math.maxInt(u64);
+        const sq_cur = std.math.mul(u64, current_words, current_words) catch return std.math.maxInt(u64);
+        const current_cost = std.math.add(u64, sq_cur / 512, 3 * current_words) catch return std.math.maxInt(u64);
 
         return cost - current_cost;
     }

@@ -87,9 +87,10 @@ pub fn memoryExpansionCost(current_words: usize, new_words: usize) u64 {
 }
 
 fn memoryCost(num_words: usize) u64 {
-    const linear = num_words * G_MEMORY;
-    const quadratic = (num_words * num_words) / 512;
-    return @intCast(linear + quadratic);
+    const n: u64 = @intCast(num_words);
+    const linear = std.math.mul(u64, n, G_MEMORY) catch return std.math.maxInt(u64);
+    const quadratic = (std.math.mul(u64, n, n) catch return std.math.maxInt(u64)) / 512;
+    return std.math.add(u64, linear, quadratic) catch std.math.maxInt(u64);
 }
 
 // Calculate memory size in words (rounded up)

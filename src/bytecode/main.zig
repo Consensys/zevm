@@ -226,6 +226,9 @@ pub const BASEFEE: u8 = 0x48;
 pub const BLOBHASH: u8 = 0x49;
 pub const BLOBBASEFEE: u8 = 0x4A;
 pub const SLOTNUM: u8 = 0x4B;
+pub const DUPN: u8 = 0xE6;
+pub const SWAPN: u8 = 0xE7;
+pub const EXCHANGE: u8 = 0xE8;
 pub const POP: u8 = 0x50;
 pub const MLOAD: u8 = 0x51;
 pub const MSTORE: u8 = 0x52;
@@ -486,6 +489,9 @@ pub const OPCODE_INFO: [256]?OpCodeInfo = blk: {
     map[LOG4] = OpCodeInfo{ .name = "LOG4", .inputs = 6, .outputs = 0, .immediate_size = 0, .terminating = false };
 
     // System operations
+    map[DUPN] = OpCodeInfo{ .name = "DUPN", .inputs = 0, .outputs = 1, .immediate_size = 1, .terminating = false };
+    map[SWAPN] = OpCodeInfo{ .name = "SWAPN", .inputs = 0, .outputs = 0, .immediate_size = 1, .terminating = false };
+    map[EXCHANGE] = OpCodeInfo{ .name = "EXCHANGE", .inputs = 0, .outputs = 0, .immediate_size = 1, .terminating = false };
     map[CREATE] = OpCodeInfo{ .name = "CREATE", .inputs = 3, .outputs = 1, .immediate_size = 0, .terminating = false };
     map[CALL] = OpCodeInfo{ .name = "CALL", .inputs = 7, .outputs = 1, .immediate_size = 0, .terminating = false };
     map[CALLCODE] = OpCodeInfo{ .name = "CALLCODE", .inputs = 7, .outputs = 1, .immediate_size = 0, .terminating = false };
