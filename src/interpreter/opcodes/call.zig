@@ -227,7 +227,7 @@ fn callImpl(
     const sub_gas_limit: u64 = forwarded +| stipend;
 
     // Deduct base cost then the forwarded amount from this frame's gas.
-    // EIP-v5.5.1: regular gas (base + forwarded) must be charged before state gas.
+    // regular gas (base + forwarded) must be charged before state gas.
     if (!ctx.interpreter.gas.spend(base_cost)) {
         ctx.interpreter.halt(.out_of_gas);
         return;

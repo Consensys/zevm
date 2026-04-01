@@ -614,7 +614,7 @@ pub fn opSelfdestruct(ctx: *InstructionContext) void {
         dyn_gas += 25000;
     }
 
-    // EIP-v5.5.1: regular gas before state gas.
+    // regular gas before state gas.
     if (!ctx.interpreter.gas.spend(dyn_gas)) {
         ctx.interpreter.halt(.out_of_gas);
         return;
