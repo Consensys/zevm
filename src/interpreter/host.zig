@@ -416,10 +416,6 @@ pub const Host = struct {
         frame_depth: usize,
     ) CreateSetupResult {
         const MAX_CALL_DEPTH = 1024;
-        // EIP-7954 (Amsterdam+): max code size doubled from 24576 to 32768
-        const MAX_CODE_SIZE: usize = 24576;
-        const AMSTERDAM_MAX_CODE_SIZE: usize = 32768;
-
         const js = &self.ctx.journaled_state;
         const spec_id = js.inner.spec;
 
@@ -427,9 +423,9 @@ pub const Host = struct {
 
         if (primitives.isEnabledIn(spec_id, .shanghai)) {
             const max_initcode: usize = if (primitives.isEnabledIn(spec_id, .amsterdam))
-                2 * AMSTERDAM_MAX_CODE_SIZE
+                primitives.AMSTERDAM_MAX_INITCODE_SIZE
             else
-                2 * MAX_CODE_SIZE;
+                primitives.MAX_INITCODE_SIZE;
             if (init_code.len > max_initcode) return .{ .failed = CreateResult.preExecFailure(gas_limit) };
         }
 
@@ -496,8 +492,7 @@ pub const Host = struct {
         return_data: []const u8,
         spec_id: primitives.SpecId,
     ) CreateResult {
-        // EIP-7954 (Amsterdam+): max code size doubled from 24576 to 32768
-        const MAX_CODE_SIZE: usize = if (primitives.isEnabledIn(spec_id, .amsterdam)) 32768 else 24576;
+        const MAX_CODE_SIZE: usize = if (primitives.isEnabledIn(spec_id, .amsterdam)) primitives.AMSTERDAM_MAX_CODE_SIZE else primitives.MAX_CODE_SIZE;
         const js = &self.ctx.journaled_state;
 
         if (!result.isSuccess()) {

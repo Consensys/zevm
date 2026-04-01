@@ -384,7 +384,7 @@ pub fn opCreate(ctx: *InstructionContext) void {
     // EIP-3860 (Shanghai+): oversized initcode causes exceptional halt in calling frame.
     // EIP-7954 (Amsterdam+): limit doubled to 65536 (2 * 32768).
     if (primitives.isEnabledIn(spec, .shanghai)) {
-        const max_initcode: usize = if (primitives.isEnabledIn(spec, .amsterdam)) 65536 else 49152;
+        const max_initcode: usize = if (primitives.isEnabledIn(spec, .amsterdam)) primitives.AMSTERDAM_MAX_INITCODE_SIZE else primitives.MAX_INITCODE_SIZE;
         if (size_u > max_initcode) {
             ctx.interpreter.halt(.out_of_gas);
             return;
@@ -495,7 +495,7 @@ pub fn opCreate2(ctx: *InstructionContext) void {
     // EIP-3860 (Shanghai+): oversized initcode causes exceptional halt in calling frame.
     // EIP-7954 (Amsterdam+): limit doubled to 65536 (2 * 32768).
     if (primitives.isEnabledIn(spec, .shanghai)) {
-        const max_initcode: usize = if (primitives.isEnabledIn(spec, .amsterdam)) 65536 else 49152;
+        const max_initcode: usize = if (primitives.isEnabledIn(spec, .amsterdam)) primitives.AMSTERDAM_MAX_INITCODE_SIZE else primitives.MAX_INITCODE_SIZE;
         if (size_u > max_initcode) {
             ctx.interpreter.halt(.out_of_gas);
             return;
