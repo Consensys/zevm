@@ -88,24 +88,11 @@ pub fn main() !void {
         const root = parsed.value;
         if (root != .object) continue;
 
-        // If any top-level key contains "fork_Osaka", skip matching "fork_Prague" entries
-        var has_osaka = false;
-        {
-            var it = root.object.iterator();
-            while (it.next()) |kv| {
-                if (std.mem.indexOf(u8, kv.key_ptr.*, "fork_Osaka") != null) {
-                    has_osaka = true;
-                    break;
-                }
-            }
-        }
-
         var test_iter = root.object.iterator();
         while (test_iter.next()) |test_entry| {
             const test_name = test_entry.key_ptr.*;
             const test_obj = test_entry.value_ptr.*;
             if (test_obj != .object) continue;
-            if (has_osaka and std.mem.indexOf(u8, test_name, "fork_Prague") != null) continue;
 
             var cases: std.ArrayList(types.TestCase) = .{};
             parseTestCases(a, test_name, &test_obj.object, &cases) catch |err| {
