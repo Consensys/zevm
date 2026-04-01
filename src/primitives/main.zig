@@ -81,6 +81,15 @@ pub const STACK_LIMIT: usize = 1024;
 /// EVM call stack limit
 pub const CALL_STACK_LIMIT: u64 = 1024;
 
+/// EIP-170: maximum deployed contract code size (24576 bytes)
+pub const MAX_CODE_SIZE: usize = 24576;
+/// EIP-7954 (Amsterdam+): maximum deployed contract code size doubled (32768 bytes)
+pub const AMSTERDAM_MAX_CODE_SIZE: usize = 32768;
+/// EIP-3860: maximum initcode size = 2 * MAX_CODE_SIZE (49152 bytes)
+pub const MAX_INITCODE_SIZE: usize = 2 * MAX_CODE_SIZE;
+/// EIP-7954 (Amsterdam+): maximum initcode size = 2 * AMSTERDAM_MAX_CODE_SIZE (65536 bytes)
+pub const AMSTERDAM_MAX_INITCODE_SIZE: usize = 2 * AMSTERDAM_MAX_CODE_SIZE;
+
 /// Blob base fee update fraction for Cancun hardfork (EIP-4844)
 pub const BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN: u64 = 3338477;
 /// Blob base fee update fraction for Prague/Osaka hardfork (EIP-7691)

@@ -416,16 +416,17 @@ pub const Host = struct {
         frame_depth: usize,
     ) CreateSetupResult {
         const MAX_CALL_DEPTH = 1024;
-        const MAX_CODE_SIZE: usize = 24576;
-        const MAX_INITCODE_SIZE: usize = 2 * MAX_CODE_SIZE;
-
         const js = &self.ctx.journaled_state;
         const spec_id = js.inner.spec;
 
         if (frame_depth >= MAX_CALL_DEPTH) return .{ .failed = CreateResult.preExecFailure(gas_limit) };
 
         if (primitives.isEnabledIn(spec_id, .shanghai)) {
-            if (init_code.len > MAX_INITCODE_SIZE) return .{ .failed = CreateResult.preExecFailure(gas_limit) };
+            const max_initcode: usize = if (primitives.isEnabledIn(spec_id, .amsterdam))
+                primitives.AMSTERDAM_MAX_INITCODE_SIZE
+            else
+                primitives.MAX_INITCODE_SIZE;
+            if (init_code.len > max_initcode) return .{ .failed = CreateResult.preExecFailure(gas_limit) };
         }
 
         if (value > 0) {
@@ -491,7 +492,7 @@ pub const Host = struct {
         return_data: []const u8,
         spec_id: primitives.SpecId,
     ) CreateResult {
-        const MAX_CODE_SIZE: usize = 24576;
+        const MAX_CODE_SIZE: usize = if (primitives.isEnabledIn(spec_id, .amsterdam)) primitives.AMSTERDAM_MAX_CODE_SIZE else primitives.MAX_CODE_SIZE;
         const js = &self.ctx.journaled_state;
 
         if (!result.isSuccess()) {
