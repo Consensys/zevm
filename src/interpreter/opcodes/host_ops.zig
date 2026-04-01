@@ -159,7 +159,7 @@ pub fn opExtcodecopy(ctx: *InstructionContext) void {
         }
         const mem_off_u: usize = @intCast(mem_off);
         const size_u: usize = @intCast(size);
-        const num_words = (size_u + 31) / 32;
+        const num_words = std.math.divCeil(usize, size_u, 32) catch unreachable;
         if (!ctx.interpreter.gas.spend(gas_costs.G_COPY * @as(u64, @intCast(num_words)))) {
             ctx.interpreter.halt(.out_of_gas);
             return;
@@ -199,8 +199,8 @@ pub fn opExtcodecopy(ctx: *InstructionContext) void {
         return;
     };
 
-    // Dynamic: copy cost
-    const num_words = (size_u + 31) / 32;
+    // Dynamic: copy cost — use divCeil to avoid (size + 31) overflow when size = maxInt(usize)
+    const num_words = std.math.divCeil(usize, size_u, 32) catch unreachable;
     if (!ctx.interpreter.gas.spend(gas_costs.G_COPY * @as(u64, @intCast(num_words)))) {
         ctx.interpreter.halt(.out_of_gas);
         return;
@@ -489,9 +489,18 @@ pub fn makeLogFn(comptime n: u8) *const fn (ctx: *InstructionContext) void {
             const offset_u: usize = if (size_u == 0) 0 else @intCast(offset);
 
             // Dynamic: data cost + topic cost
-            const data_cost: u64 = gas_costs.G_LOGDATA * @as(u64, @intCast(size_u));
+            // Use checked arithmetic: size_u can be maxInt(usize) on 64-bit systems,
+            // making G_LOGDATA * size_u overflow a u64.
+            const data_cost: u64 = std.math.mul(u64, gas_costs.G_LOGDATA, @as(u64, @intCast(size_u))) catch {
+                ctx.interpreter.halt(.out_of_gas);
+                return;
+            };
             const topic_cost: u64 = gas_costs.G_LOGTOPIC * @as(u64, n);
-            if (!ctx.interpreter.gas.spend(data_cost + topic_cost)) {
+            const log_gas = std.math.add(u64, data_cost, topic_cost) catch {
+                ctx.interpreter.halt(.out_of_gas);
+                return;
+            };
+            if (!ctx.interpreter.gas.spend(log_gas)) {
                 ctx.interpreter.halt(.out_of_gas);
                 return;
             }

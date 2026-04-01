@@ -112,7 +112,9 @@ pub fn opMstore8(ctx: *InstructionContext) void {
     const value = stack.peekUnsafe(1);
     stack.shrinkUnsafe(2);
 
-    if (offset > std.math.maxInt(usize)) {
+    // Guard must use >= maxInt(usize) so that offset = maxInt(usize) doesn't slip through
+    // and cause offset_usize + 1 to overflow in ReleaseSafe mode.
+    if (offset >= std.math.maxInt(usize)) {
         ctx.interpreter.halt(.memory_limit_oog);
         return;
     }
