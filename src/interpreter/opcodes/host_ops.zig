@@ -489,9 +489,18 @@ pub fn makeLogFn(comptime n: u8) *const fn (ctx: *InstructionContext) void {
             const offset_u: usize = if (size_u == 0) 0 else @intCast(offset);
 
             // Dynamic: data cost + topic cost
-            const data_cost: u64 = gas_costs.G_LOGDATA * @as(u64, @intCast(size_u));
+            // Use checked arithmetic: size_u can be maxInt(usize) on 64-bit systems,
+            // making G_LOGDATA * size_u overflow a u64.
+            const data_cost: u64 = std.math.mul(u64, gas_costs.G_LOGDATA, @as(u64, @intCast(size_u))) catch {
+                ctx.interpreter.halt(.out_of_gas);
+                return;
+            };
             const topic_cost: u64 = gas_costs.G_LOGTOPIC * @as(u64, n);
-            if (!ctx.interpreter.gas.spend(data_cost + topic_cost)) {
+            const log_gas = std.math.add(u64, data_cost, topic_cost) catch {
+                ctx.interpreter.halt(.out_of_gas);
+                return;
+            };
+            if (!ctx.interpreter.gas.spend(log_gas)) {
                 ctx.interpreter.halt(.out_of_gas);
                 return;
             }
