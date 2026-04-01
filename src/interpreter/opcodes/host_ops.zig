@@ -372,12 +372,22 @@ pub fn opSstore(ctx: *InstructionContext) void {
         return;
     };
 
-    // Compute gas cost using EIP-2200/EIP-2929 rules
-    const sstore_gas = gas_costs.getSstoreCost(spec, result.original, result.current, result.new, result.is_cold);
+    // Compute gas cost using EIP-2200/EIP-2929/EIP-8037 rules
+    const block_gas_limit = h.ctx.block.gas_limit;
+    const sstore_gas = gas_costs.getSstoreCost(spec, result.original, result.current, result.new, result.is_cold, block_gas_limit);
 
     if (!ctx.interpreter.gas.spend(sstore_gas.gas_cost)) {
         ctx.interpreter.halt(.out_of_gas);
         return;
+    }
+
+    // EIP-8037 (Amsterdam+): charge state gas for new storage slot creation.
+    // Draws from reservoir first, spills to gas_left if needed.
+    if (sstore_gas.state_gas > 0) {
+        if (!ctx.interpreter.gas.spendStateGas(sstore_gas.state_gas)) {
+            ctx.interpreter.halt(.out_of_gas);
+            return;
+        }
     }
 
     // Apply gas refund (can be positive or negative)
@@ -596,17 +606,28 @@ pub fn opSelfdestruct(ctx: *InstructionContext) void {
     //   Pre-EIP-150 (Frontier/Homestead): no G_NEWACCOUNT for SELFDESTRUCT (it was 0 gas total).
     //   EIP-150 to pre-EIP-161: charged for ANY SELFDESTRUCT to a non-existent account.
     //   EIP-161+ (Spurious Dragon+): only charged when value > 0 (had_value).
-    if (!result.target_exists and primitives.isEnabledIn(spec, .tangerine)) {
-        if (primitives.isEnabledIn(spec, .spurious_dragon)) {
-            if (result.had_value) dyn_gas += 25000;
-        } else {
-            dyn_gas += 25000;
-        }
+    //   EIP-8037 (Amsterdam+): G_NEWACCOUNT replaced with STATE_BYTES_PER_NEW_ACCOUNT * cpsb state gas.
+    const selfdestruct_charges_new_account = !result.target_exists and
+        primitives.isEnabledIn(spec, .tangerine) and
+        (if (primitives.isEnabledIn(spec, .spurious_dragon)) result.had_value else true);
+    if (selfdestruct_charges_new_account and !primitives.isEnabledIn(spec, .amsterdam)) {
+        dyn_gas += 25000;
     }
 
+    // regular gas before state gas.
     if (!ctx.interpreter.gas.spend(dyn_gas)) {
         ctx.interpreter.halt(.out_of_gas);
         return;
+    }
+
+    // EIP-8037 (Amsterdam+): charge state gas for new account via SELFDESTRUCT.
+    // Draws from reservoir first, spills to gas_left if needed.
+    if (selfdestruct_charges_new_account and primitives.isEnabledIn(spec, .amsterdam)) {
+        const cpsb = gas_costs.costPerStateByte(h.ctx.block.gas_limit);
+        if (!ctx.interpreter.gas.spendStateGas(gas_costs.STATE_BYTES_PER_NEW_ACCOUNT * cpsb)) {
+            ctx.interpreter.halt(.out_of_gas);
+            return;
+        }
     }
 
     // Pre-London: SELFDESTRUCT gives a refund of R_SELFDESTRUCT (24000), but only on the

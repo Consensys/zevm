@@ -401,7 +401,7 @@ pub fn runTestCase(tc: types.TestCase, allocator: std.mem.Allocator) TestOutcome
     // ---------------------------------------------------------------------------
     // Execute frame
     // ---------------------------------------------------------------------------
-    var frame_result = MainnetHandler.executeFrame(&evm, initial_gas.initial_gas) catch {
+    var frame_result = MainnetHandler.executeFrame(&evm, initial_gas) catch {
         if (tc.expect_exception) {
             return .{ .result = .pass, .detail = .{ .reason = "expected exception: execution error" } };
         }

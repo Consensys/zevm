@@ -182,11 +182,38 @@ fn callImpl(
         }
     }
 
-    // EIP-150: cap forwarded gas to 63/64 of remaining. Pre-EIP-150: forward up to all remaining.
+    // EIP-8037 (Amsterdam+): charge_state_gas in EELS draws from state_gas_left (reservoir) first,
+    // then spills any remainder to gas_left BEFORE forwarded gas is computed. We replicate that
+    // arithmetic here (without yet touching any counters) so the 63/64 rule operates on the
+    // correct budget after state gas.
+    const new_account_state_gas: u64 = blk: {
+        const MAX_CALL_DEPTH: usize = 1024;
+        if (primitives.isEnabledIn(spec, .amsterdam) and transfers_value and !account_exists and
+            ctx.interpreter.input.depth < MAX_CALL_DEPTH)
+        {
+            const cpsb = gas_costs.costPerStateByte(h.ctx.block.gas_limit);
+            break :blk gas_costs.STATE_BYTES_PER_NEW_ACCOUNT * cpsb;
+        }
+        break :blk 0;
+    };
+    const state_gas_spill: u64 = if (new_account_state_gas > 0) blk: {
+        const reservoir = ctx.interpreter.gas.reservoir;
+        if (new_account_state_gas <= reservoir) break :blk 0;
+        break :blk new_account_state_gas - reservoir;
+    } else 0;
+
+    if (after_base < state_gas_spill) {
+        ctx.interpreter.halt(.out_of_gas);
+        return;
+    }
+
+    // Budget from which 63/64 forwarded gas is computed (excludes state gas spill).
+    const budget = after_base - state_gas_spill;
+    // EIP-150: cap forwarded gas to 63/64 of budget. Pre-EIP-150: forward up to all budget.
     const max_forwarded: u64 = if (primitives.isEnabledIn(spec, .tangerine))
-        after_base - after_base / 64
+        budget - budget / 64
     else
-        after_base;
+        budget;
 
     const forwarded: u64 = @min(
         if (gas_val > std.math.maxInt(u64)) max_forwarded else @as(u64, @intCast(gas_val)),
@@ -200,14 +227,35 @@ fn callImpl(
     const sub_gas_limit: u64 = forwarded +| stipend;
 
     // Deduct base cost then the forwarded amount from this frame's gas.
+    // regular gas (base + forwarded) must be charged before state gas.
     if (!ctx.interpreter.gas.spend(base_cost)) {
         ctx.interpreter.halt(.out_of_gas);
         return;
     }
+
     if (!ctx.interpreter.gas.spend(forwarded)) {
         ctx.interpreter.halt(.out_of_gas);
         return;
     }
+
+    // EIP-8037 (Amsterdam+): charge state gas for new account creation via value-bearing CALL.
+    // The budget for forwarded gas was already reduced by state_gas_spill above, so this will
+    // always succeed (reservoir covers part or all; regular gas covers any spill).
+    if (new_account_state_gas > 0) {
+        if (!ctx.interpreter.gas.spendStateGas(new_account_state_gas)) {
+            ctx.interpreter.halt(.out_of_gas);
+            return;
+        }
+    }
+
+    // EIP-8037 (Amsterdam+): pass full reservoir to child; zero parent's reservoir.
+    // The reservoir is restored on child failure (via resumeCall below for pre-exec failures,
+    // or via the frame runner for normal sub-frames).
+    const call_reservoir: u64 = if (primitives.isEnabledIn(spec, .amsterdam)) blk: {
+        const r = ctx.interpreter.gas.reservoir;
+        ctx.interpreter.gas.reservoir = 0;
+        break :blk r;
+    } else 0;
 
     // Build call inputs. For DELEGATECALL, caller and value come from parent frame.
     // For CALLCODE, target (storage context) stays as current contract.
@@ -240,6 +288,7 @@ fn callImpl(
         .gas_limit = sub_gas_limit,
         .scheme = scheme,
         .is_static = call_is_static,
+        .reservoir = call_reservoir,
     };
 
     // Dispatch via setupCall. Precompile/failure results are finalized immediately.
@@ -247,9 +296,17 @@ fn callImpl(
     const setup = h.setupCall(inputs, ctx.interpreter.input.depth);
     switch (setup) {
         .failed => |r| {
-            resumeCall(ctx.interpreter, r, ret_off_u, ret_size_u);
+            // setupCall failed (depth limit, balance, etc.).
+            // EIP-8037: return the reservoir (call_reservoir) that was saved+zeroed.
+            // The new_account state gas (if charged) stays consumed — it's part of the
+            // parent's state usage for attempting to create a new account.
+            var result = r;
+            result.state_gas_remaining = call_reservoir;
+            resumeCall(ctx.interpreter, result, ret_off_u, ret_size_u);
         },
         .precompile => |r| {
+            // Precompile ran. It doesn't use state gas, so reservoir comes back intact.
+            // state_gas_remaining is already set to inputs.reservoir in setupCall.
             resumeCall(ctx.interpreter, r, ret_off_u, ret_size_u);
         },
         .ready => |s| {
@@ -269,6 +326,10 @@ fn callImpl(
 pub fn resumeCall(interp: *Interpreter, result: host_module.CallResult, ret_off: usize, ret_size: usize) void {
     interp.gas.remaining +|= result.gas_remaining;
     interp.gas.refunded += result.gas_refunded;
+    interp.gas.addStateGasFromChild(result.state_gas_used);
+    // EIP-8037: restore the reservoir from the child (on success: child's remaining reservoir;
+    // on failure: all child state gas + reservoir returned as state_gas_remaining).
+    interp.gas.reservoir += result.state_gas_remaining;
 
     const actual = @min(result.return_data.len, ret_size);
     if (actual > 0) {
@@ -293,6 +354,10 @@ pub fn resumeCall(interp: *Interpreter, result: host_module.CallResult, ret_off:
 pub fn resumeCreate(interp: *Interpreter, result: host_module.CreateResult) void {
     interp.gas.remaining +|= result.gas_remaining;
     interp.gas.refunded += result.gas_refunded;
+    interp.gas.addStateGasFromChild(result.state_gas_used);
+    // EIP-8037: restore the reservoir from the child (on success: child's remaining reservoir;
+    // on failure: all child state gas + reservoir returned as state_gas_remaining).
+    interp.gas.reservoir += result.state_gas_remaining;
     interp.return_data.data = @constCast(result.return_data);
 
     if (!interp.stack.hasSpace(1)) {
@@ -354,8 +419,10 @@ pub fn opCreate(ctx: *InstructionContext) void {
 
     const spec = ctx.interpreter.runtime_flags.spec_id;
 
-    // Base cost
-    if (!ctx.interpreter.gas.spend(gas_costs.G_CREATE)) {
+    // Base cost: EIP-8037 (Amsterdam+) reduces regular CREATE cost from 32000 to 9000;
+    // state gas for new account + code deposit is charged separately in finalizeCreate.
+    const create_base_cost: u64 = if (primitives.isEnabledIn(spec, .amsterdam)) 9000 else gas_costs.G_CREATE;
+    if (!ctx.interpreter.gas.spend(create_base_cost)) {
         ctx.interpreter.halt(.out_of_gas);
         return;
     }
@@ -400,6 +467,16 @@ pub fn opCreate(ctx: *InstructionContext) void {
         }
     }
 
+    // EIP-8037 (Amsterdam+): charge state gas for new account creation.
+    // Charged BEFORE forwarded gas is computed so `remaining` reflects the state gas cost.
+    if (primitives.isEnabledIn(spec, .amsterdam)) {
+        const cpsb = gas_costs.costPerStateByte(h.ctx.block.gas_limit);
+        if (!ctx.interpreter.gas.spendStateGas(gas_costs.STATE_BYTES_PER_NEW_ACCOUNT * cpsb)) {
+            ctx.interpreter.halt(.out_of_gas);
+            return;
+        }
+    }
+
     // EIP-150 (Tangerine Whistle): forward at most 63/64 of remaining gas.
     // Pre-EIP-150 (Frontier/Homestead): forward all remaining gas.
     const remaining = ctx.interpreter.gas.remaining;
@@ -419,11 +496,21 @@ pub fn opCreate(ctx: *InstructionContext) void {
         return;
     }
 
+    // EIP-8037 (Amsterdam+): save+zero parent's reservoir to pass to child.
+    const create_reservoir: u64 = if (primitives.isEnabledIn(spec, .amsterdam)) blk: {
+        const r = ctx.interpreter.gas.reservoir;
+        ctx.interpreter.gas.reservoir = 0;
+        break :blk r;
+    } else 0;
+
     const caller = ctx.interpreter.input.target;
-    const setup = h.setupCreate(caller, value, init_code, forwarded, false, 0, false, ctx.interpreter.input.depth);
+    const setup = h.setupCreate(caller, value, init_code, forwarded, false, 0, false, ctx.interpreter.input.depth, true);
     switch (setup) {
         .failed => |r| {
-            resumeCreate(ctx.interpreter, r);
+            // EIP-8037: restore reservoir on pre-exec failure.
+            var result = r;
+            result.state_gas_remaining = create_reservoir;
+            resumeCreate(ctx.interpreter, result);
         },
         .ready => |s| {
             ctx.interpreter.pending = .{ .create = PendingCreateData{
@@ -434,6 +521,7 @@ pub fn opCreate(ctx: *InstructionContext) void {
                     .gas_limit = forwarded,
                     .scheme = .create,
                     .salt = null,
+                    .reservoir = create_reservoir,
                 },
                 .new_addr = s.new_addr,
                 .checkpoint = s.checkpoint,
@@ -467,7 +555,9 @@ pub fn opCreate2(ctx: *InstructionContext) void {
 
     const spec = ctx.interpreter.runtime_flags.spec_id;
 
-    if (!ctx.interpreter.gas.spend(gas_costs.G_CREATE)) {
+    // EIP-8037 (Amsterdam+): same reduced regular cost as CREATE.
+    const create2_base_cost: u64 = if (primitives.isEnabledIn(spec, .amsterdam)) 9000 else gas_costs.G_CREATE;
+    if (!ctx.interpreter.gas.spend(create2_base_cost)) {
         ctx.interpreter.halt(.out_of_gas);
         return;
     }
@@ -519,6 +609,16 @@ pub fn opCreate2(ctx: *InstructionContext) void {
         }
     }
 
+    // EIP-8037 (Amsterdam+): charge state gas for new account creation.
+    // Charged BEFORE forwarded gas is computed so `remaining` reflects the state gas cost.
+    if (primitives.isEnabledIn(spec, .amsterdam)) {
+        const cpsb = gas_costs.costPerStateByte(h.ctx.block.gas_limit);
+        if (!ctx.interpreter.gas.spendStateGas(gas_costs.STATE_BYTES_PER_NEW_ACCOUNT * cpsb)) {
+            ctx.interpreter.halt(.out_of_gas);
+            return;
+        }
+    }
+
     // EIP-150 (Tangerine Whistle): forward at most 63/64 of remaining gas.
     // Pre-EIP-150: forward all remaining gas (CREATE2 didn't exist then, but symmetric).
     const remaining = ctx.interpreter.gas.remaining;
@@ -538,12 +638,22 @@ pub fn opCreate2(ctx: *InstructionContext) void {
         return;
     }
 
+    // EIP-8037 (Amsterdam+): save+zero parent's reservoir to pass to child.
+    const create_reservoir: u64 = if (primitives.isEnabledIn(spec, .amsterdam)) blk: {
+        const r = ctx.interpreter.gas.reservoir;
+        ctx.interpreter.gas.reservoir = 0;
+        break :blk r;
+    } else 0;
+
     const caller = ctx.interpreter.input.target;
     const salt_hash = host_module.u256ToHash(salt);
-    const setup = h.setupCreate(caller, value, init_code, forwarded, true, salt, false, ctx.interpreter.input.depth);
+    const setup = h.setupCreate(caller, value, init_code, forwarded, true, salt, false, ctx.interpreter.input.depth, true);
     switch (setup) {
         .failed => |r| {
-            resumeCreate(ctx.interpreter, r);
+            // EIP-8037: restore reservoir on pre-exec failure.
+            var result = r;
+            result.state_gas_remaining = create_reservoir;
+            resumeCreate(ctx.interpreter, result);
         },
         .ready => |s| {
             ctx.interpreter.pending = .{ .create = PendingCreateData{
@@ -554,6 +664,7 @@ pub fn opCreate2(ctx: *InstructionContext) void {
                     .gas_limit = forwarded,
                     .scheme = .create2,
                     .salt = salt_hash,
+                    .reservoir = create_reservoir,
                 },
                 .new_addr = s.new_addr,
                 .checkpoint = s.checkpoint,

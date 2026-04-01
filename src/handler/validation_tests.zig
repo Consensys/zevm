@@ -19,15 +19,15 @@ const InitialAndFloorGas = validation.InitialAndFloorGas;
 test "intrinsic gas: base CALL = 21000" {
     var tx = context.TxEnv.default();
     defer tx.deinit();
-    const gas = Validation.calculateInitialGas(&tx, primitives.SpecId.prague);
+    const gas = Validation.calculateInitialGas(&tx, primitives.SpecId.prague, 120_000_000);
     try std.testing.expectEqual(@as(u64, 21000), gas);
 }
 
-test "intrinsic gas: CREATE adds 32000" {
+test "intrinsic gas: CREATE adds 32000 (pre-Amsterdam)" {
     var tx = context.TxEnv.default();
     defer tx.deinit();
     tx.kind = context.TxKind.Create;
-    const gas = Validation.calculateInitialGas(&tx, primitives.SpecId.prague);
+    const gas = Validation.calculateInitialGas(&tx, primitives.SpecId.prague, 120_000_000);
     try std.testing.expectEqual(@as(u64, 21000 + 32000), gas);
 }
 
@@ -38,7 +38,7 @@ test "intrinsic gas: zero byte costs 4, nonzero costs 16" {
     try data.append(std.heap.c_allocator, 0x00); // 4 gas
     try data.append(std.heap.c_allocator, 0xFF); // 16 gas
     tx.data = data;
-    const gas = Validation.calculateInitialGas(&tx, primitives.SpecId.prague);
+    const gas = Validation.calculateInitialGas(&tx, primitives.SpecId.prague, 120_000_000);
     try std.testing.expectEqual(@as(u64, 21000 + 4 + 16), gas);
 }
 
