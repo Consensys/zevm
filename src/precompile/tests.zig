@@ -333,10 +333,10 @@ test "ModExp precompile - large exponent" {
     input[63] = 10;
     input[95] = 1;
 
-    input[96] = 2;   // base = 2 (1 byte)
+    input[96] = 2; // base = 2 (1 byte)
     // exp = 1 (10 bytes at input[97..107], big-endian; last byte = 1)
-    input[106] = 1;  // exp = 1
-    input[107] = 5;  // mod = 5 (1 byte)
+    input[106] = 1; // exp = 1
+    input[107] = 5; // mod = 5 (1 byte)
 
     const result = modexp.byzantiumRun(&input, 100000);
 
