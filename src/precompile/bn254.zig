@@ -208,20 +208,46 @@ fn runPairing(input: []const u8, pair_per_point_cost: u64, pair_base_cost: u64, 
     return T.PrecompileResult{ .success = T.PrecompileOutput.new(gas_used, heap_out) };
 }
 
-/// Basic validation for G1 point (checks if coordinates are in valid range)
-/// TODO: Replace with proper curve validation
-fn isValidG1Point(point: []const u8) bool {
-    if (point.len < G1_LEN) return false;
-    // Basic check: not all zeros (unless it's point at infinity which is (0,0))
-    // For now, accept any 64-byte input
-    return true;
+/// BN254 field modulus (Fq) = 0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47
+const BN254_FQ_MODULUS: [32]u8 = .{
+    0x30, 0x64, 0x4e, 0x72, 0xe1, 0x31, 0xa0, 0x29,
+    0xb8, 0x50, 0x45, 0xb6, 0x81, 0x81, 0x58, 0x5d,
+    0x97, 0x81, 0x6a, 0x91, 0x68, 0x71, 0xca, 0x8d,
+    0x3c, 0x20, 0x8c, 0x16, 0xd8, 0x7c, 0xfd, 0x47,
+};
+
+/// Returns true iff the 32-byte big-endian value is strictly less than the BN254 field modulus.
+fn isBelowFieldModulus(value: *const [32]u8) bool {
+    for (value, &BN254_FQ_MODULUS) |v, m| {
+        if (v < m) return true;
+        if (v > m) return false;
+    }
+    return false; // equal to modulus — not valid
 }
 
-/// Basic validation for G2 point
-/// TODO: Replace with proper curve validation
+/// Validate a G1 point per EIP-196: both coordinates must be < field modulus.
+/// (0, 0) is the point at infinity and is always valid.
+fn isValidG1Point(point: []const u8) bool {
+    if (point.len < G1_LEN) return false;
+    const x: *const [32]u8 = point[0..32];
+    const y: *const [32]u8 = point[32..64];
+    // Point at infinity
+    if (std.mem.allEqual(u8, x, 0) and std.mem.allEqual(u8, y, 0)) return true;
+    return isBelowFieldModulus(x) and isBelowFieldModulus(y);
+}
+
+/// Validate a G2 point per EIP-197: all four 32-byte Fq field elements must be < field modulus.
+/// (0, 0, 0, 0) is the point at infinity and is always valid.
 fn isValidG2Point(point: []const u8) bool {
     if (point.len < G2_LEN) return false;
-    // Basic check: not all zeros (unless it's point at infinity)
-    // For now, accept any 128-byte input
-    return true;
+    // G2 coordinates are Fq2 elements encoded as (im, re) pairs.
+    const x_im: *const [32]u8 = point[0..32];
+    const x_re: *const [32]u8 = point[32..64];
+    const y_im: *const [32]u8 = point[64..96];
+    const y_re: *const [32]u8 = point[96..128];
+    // Point at infinity
+    if (std.mem.allEqual(u8, x_im, 0) and std.mem.allEqual(u8, x_re, 0) and
+        std.mem.allEqual(u8, y_im, 0) and std.mem.allEqual(u8, y_re, 0)) return true;
+    return isBelowFieldModulus(x_im) and isBelowFieldModulus(x_re) and
+        isBelowFieldModulus(y_im) and isBelowFieldModulus(y_re);
 }
