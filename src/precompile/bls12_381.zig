@@ -356,12 +356,11 @@ pub fn bls12G2MsmRun(input: []const u8, gas_limit: u64) T.PrecompileResult {
 
 /// BLS12-381 pairing check
 pub fn bls12PairingRun(input: []const u8, gas_limit: u64) T.PrecompileResult {
-    if (input.len < PADDED_G1_LENGTH + PADDED_G2_LENGTH) {
-        return T.PrecompileResult{ .err = T.PrecompileError.Bls12381PairingInputLength };
-    }
-
     const pair_len = PADDED_G1_LENGTH + PADDED_G2_LENGTH;
-    if (input.len % pair_len != 0) {
+
+    // EIP-2537: input must be a non-zero multiple of pair_len (384 bytes).
+    // Empty input is explicitly invalid per the spec and execution-spec-tests.
+    if (input.len == 0 or input.len % pair_len != 0) {
         return T.PrecompileResult{ .err = T.PrecompileError.Bls12381PairingInputLength };
     }
 

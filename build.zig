@@ -533,9 +533,22 @@ pub fn build(b: *std.Build) void {
     const run_handler_tests = b.addRunArtifact(handler_tests);
     test_step.dependOn(&run_handler_tests.step);
 
-    // Precompile unit tests - these are run via zig test command in CI
-    // The command needs to link libc and include all modules
-    // See .github/workflows/ci.yml for the full command
+    // Precompile unit tests (runs tests.zig + bn254_tests.zig etc. via main.zig)
+    const precompile_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/precompile/main.zig" } },
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    precompile_tests.root_module.addImport("primitives", primitives_module);
+    precompile_tests.root_module.addImport("zevm_allocator", zevm_allocator_module);
+    precompile_tests.root_module.addImport("precompile_types", precompile_types_module);
+    precompile_tests.root_module.addImport("precompile_implementations", native_impls_module);
+    precompile_tests.root_module.addImport("build_options", lib_options_module);
+    addCryptoLibraries(b, precompile_tests, enable_blst, enable_mcl, blst_include_path, mcl_include_path, is_windows, target_info.os.tag == .macos);
+    const run_precompile_tests = b.addRunArtifact(precompile_tests);
+    test_step.dependOn(&run_precompile_tests.step);
 
     // Example executable
     const example_exe = b.addExecutable(.{

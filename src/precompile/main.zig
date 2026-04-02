@@ -366,6 +366,10 @@ pub const Precompiles = struct {
 // Import test module
 pub const tests = @import("tests.zig");
 
+test {
+    _ = @import("tests.zig");
+}
+
 // Placeholder for testing
 pub const testing = struct {
     pub fn testPrecompile() !void {
