@@ -190,7 +190,6 @@ fn callImpl(
         return;
     }
 
-
     const after_base = remaining - base_cost;
 
     // Pre-EIP-150 (Frontier/Homestead): the caller must have gas_remaining >= base_cost + gas_val.
