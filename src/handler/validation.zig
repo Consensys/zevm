@@ -25,7 +25,7 @@ const FLOOR_NONZERO_TOKEN_COST: u64 = 4;
 /// Validation utilities
 pub const Validation = struct {
     /// Validate environment (block, tx, cfg) — no DB access needed.
-    pub fn validateEnv(evm: *main.Evm) !void {
+    pub fn validateEnv(evm: anytype) !void {
         const ctx = evm.getContext();
 
         // Validate block environment
@@ -92,7 +92,7 @@ pub const Validation = struct {
     ///
     /// Returns `InsufficientGas` if gas_limit < initial_gas or < floor total.
     /// Returns `CreateInitcodeOverLimit` if CREATE initcode exceeds EIP-3860 limit (Shanghai+).
-    pub fn validateInitialTxGas(evm: *main.Evm) !InitialAndFloorGas {
+    pub fn validateInitialTxGas(evm: anytype) !InitialAndFloorGas {
         const ctx = evm.getContext();
         const tx = &ctx.tx;
         const spec = ctx.cfg.spec;
@@ -161,7 +161,7 @@ pub const Validation = struct {
     /// - Validates nonce matches tx.nonce (unless disabled)
     /// - Validates caller balance >= gas_limit * gas_price + value + blob fees
     /// - Deducts effective gas fee + blob fee from caller and bumps nonce (journaled, revertable)
-    pub fn validateAgainstStateAndDeductCaller(evm: *main.Evm, initial_gas: u64) !void {
+    pub fn validateAgainstStateAndDeductCaller(evm: anytype, initial_gas: u64) !void {
         const ctx = evm.getContext();
         const tx = &ctx.tx;
         const cfg = &ctx.cfg;

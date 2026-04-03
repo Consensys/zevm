@@ -329,6 +329,10 @@ pub const EvmStorageSlot = struct {
     transaction_id: usize,
     /// Represents if the storage slot is cold
     is_cold: bool,
+    /// True if SSTORE was ever called for this slot during the current block.
+    /// Set by sstore(); not reset between transactions (commitTx preserves it).
+    /// Cleared only when the slot is rolled back past the point of the write.
+    was_written: bool,
 
     const Self = @This();
 
@@ -339,6 +343,7 @@ pub const EvmStorageSlot = struct {
             .present_value = original,
             .transaction_id = transaction_id,
             .is_cold = false,
+            .was_written = false,
         };
     }
 
@@ -349,6 +354,7 @@ pub const EvmStorageSlot = struct {
             .present_value = present_value,
             .transaction_id = transaction_id,
             .is_cold = false,
+            .was_written = false,
         };
     }
 
