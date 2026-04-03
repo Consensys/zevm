@@ -252,17 +252,17 @@ pub fn Context(comptime DB: type) type {
         }
 
         pub fn withCfg(self: @This(), cfg: CfgEnv) @This() {
-            var new_cfg = cfg;
-            _ = new_cfg.spec();
-            return .{
+            var result = @This(){
                 .tx = self.tx,
                 .block = self.block,
-                .cfg = new_cfg,
+                .cfg = cfg,
                 .journaled_state = self.journaled_state,
                 .local = self.local,
                 .chain = self.chain,
                 .ctx_error = ContextError.ok,
             };
+            result.journaled_state.setSpecId(cfg.spec());
+            return result;
         }
 
         /// Creates a new context with a new local context type.
@@ -282,7 +282,7 @@ pub fn Context(comptime DB: type) type {
         pub fn modifyCfgChained(self: @This(), f: fn (*CfgEnv) void) @This() {
             var new_cfg = self.cfg;
             f(&new_cfg);
-            return .{
+            var result = @This(){
                 .tx = self.tx,
                 .block = self.block,
                 .cfg = new_cfg,
@@ -291,6 +291,8 @@ pub fn Context(comptime DB: type) type {
                 .chain = self.chain,
                 .ctx_error = ContextError.ok,
             };
+            result.journaled_state.setSpecId(new_cfg.spec());
+            return result;
         }
 
         /// Modifies the context block.

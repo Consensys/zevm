@@ -685,10 +685,12 @@ fn setupCallCore(js: anytype, host: *Host, inputs: CallInputs, frame_depth: usiz
     // 5. Value transfer
     if (inputs.value > 0 and inputs.scheme != .delegatecall) {
         const transfer_err = js.transfer(inputs.caller, inputs.target, inputs.value) catch {
+            js.revertFrame();
             js.checkpointRevert(checkpoint);
             return .{ .failed = CallResult.preExecFailure(inputs.gas_limit) };
         };
         if (transfer_err != null) {
+            js.revertFrame();
             js.checkpointRevert(checkpoint);
             return .{ .failed = CallResult.preExecFailure(inputs.gas_limit) };
         }
