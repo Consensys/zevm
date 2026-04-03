@@ -245,7 +245,7 @@ pub fn EvmFor(comptime DB: type) type {
         }
 
         pub fn executeFrame(self: *@This(), frame: *Frame) !FrameResult {
-            return frame.execute(DB, self.ctx);
+            return frame.execute(self.ctx);
         }
     };
 }
@@ -299,12 +299,12 @@ pub const Frame = struct {
     }
 
     /// Execute frame with host access for full EVM semantics.
-    pub fn execute(self: *Frame, comptime DB: type, ctx: *context.Context(DB)) !FrameResult {
+    pub fn execute(self: *Frame, ctx: anytype) !FrameResult {
+        const DB = @TypeOf(ctx.*).DatabaseType;
         const schedule = interpreter.protocol_schedule.ProtocolSchedule.forSpec(
             self.interpreter.runtime_flags.spec_id,
         );
 
-        // Build a Host that delegates to the context and wire up the precompile set.
         var host = interpreter.Host.init(DB, ctx, &self.precompiles.precompiles);
 
         _ = self.interpreter.runWithHost(&schedule.instructions, &host);
