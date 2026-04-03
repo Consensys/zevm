@@ -442,8 +442,6 @@ pub const JournalInner = struct {
     bal_pending_storage: std.AutoHashMap(primitives.Address, std.AutoHashMap(primitives.StorageKey, primitives.StorageValue)),
     // Slots committed to a non-pre-block value at any tx boundary.
     bal_committed_changed: std.AutoHashMap(primitives.Address, std.AutoHashMap(primitives.StorageKey, void)),
-    // Addresses loaded only for gas calculation that went OOG (excluded from BAL).
-    bal_untracked: std.AutoHashMap(primitives.Address, void),
 
     pub fn new() JournalInner {
         return .{
@@ -460,7 +458,6 @@ pub const JournalInner = struct {
             .bal_pending_accounts = std.AutoHashMap(primitives.Address, AccountPreState).init(alloc_mod.get()),
             .bal_pending_storage = std.AutoHashMap(primitives.Address, std.AutoHashMap(primitives.StorageKey, primitives.StorageValue)).init(alloc_mod.get()),
             .bal_committed_changed = std.AutoHashMap(primitives.Address, std.AutoHashMap(primitives.StorageKey, void)).init(alloc_mod.get()),
-            .bal_untracked = std.AutoHashMap(primitives.Address, void).init(alloc_mod.get()),
         };
     }
 
@@ -483,7 +480,6 @@ pub const JournalInner = struct {
         var cc_it = self.bal_committed_changed.valueIterator();
         while (cc_it.next()) |m| m.deinit();
         self.bal_committed_changed.deinit();
-        self.bal_untracked.deinit();
     }
 
     // ── EIP-7928 BAL tracking helpers ─────────────────────────────────────────
@@ -516,25 +512,10 @@ pub const JournalInner = struct {
         gop.value_ptr.put(key, value) catch {};
     }
 
-    /// Mark an address as an OOG phantom — it was loaded for gas calc but the
-    /// operation failed before the address was truly accessed. Removed from pending.
-    pub fn untrackAddress(self: *JournalInner, address: primitives.Address) void {
-        _ = self.bal_pending_accounts.remove(address);
-        self.bal_untracked.put(address, {}) catch {};
-    }
-
-    /// Force-add an address to the current-tx pending set (for EIP-7702 delegation targets
-    /// that execute but are never loaded via basic()).
-    pub fn forceTrackAddress(self: *JournalInner, address: primitives.Address) void {
-        if (self.bal_pre_accounts.contains(address) or self.bal_pending_accounts.contains(address)) return;
-        self.bal_pending_accounts.put(address, .{}) catch {};
-    }
-
-    /// Returns true if the address is legitimately tracked (not an OOG phantom).
+    /// Returns true if the address has been accessed (appears in the BAL).
+    /// Phantom accesses are prevented at the opcode level, so all tracked addresses are legitimate.
     pub fn isTrackedAddress(self: *const JournalInner, address: primitives.Address) bool {
-        if (self.bal_pre_accounts.contains(address)) return true;
-        if (self.bal_untracked.contains(address)) return false;
-        return self.bal_pending_accounts.contains(address);
+        return self.bal_pre_accounts.contains(address) or self.bal_pending_accounts.contains(address);
     }
 
     /// Drain the accumulated Block Access Log. Flushes any remaining pending state
@@ -634,7 +615,6 @@ pub const JournalInner = struct {
                 e.value_ptr.deinit();
             }
             self.bal_pending_storage.clearRetainingCapacity();
-            self.bal_untracked.clearRetainingCapacity();
         }
 
         // Per EIP-2200/EIP-3529: after committing a transaction, the "original value"
@@ -685,7 +665,6 @@ pub const JournalInner = struct {
         var ps_it = self.bal_pending_storage.valueIterator();
         while (ps_it.next()) |m| m.deinit();
         self.bal_pending_storage.clearRetainingCapacity();
-        self.bal_untracked.clearRetainingCapacity();
     }
 
     /// Take the [`EvmState`] and clears the journal by resetting it to initial state.
@@ -1623,17 +1602,7 @@ pub fn Journal(comptime DB: type) type {
             return self.inner.isStorageCold(address, key);
         }
 
-        /// Mark an address as an OOG phantom — loaded for gas calc but operation went OOG.
-        pub fn untrackAddress(self: *@This(), address: primitives.Address) void {
-            self.inner.untrackAddress(address);
-        }
-
-        /// Force-add an address to the current-tx access log (EIP-7702 delegation targets).
-        pub fn forceTrackAddress(self: *@This(), address: primitives.Address) void {
-            self.inner.forceTrackAddress(address);
-        }
-
-        /// Returns true if the address is legitimately tracked (not an OOG phantom).
+        /// Returns true if the address has been accessed (appears in the BAL).
         pub fn isTrackedAddress(self: *const @This(), address: primitives.Address) bool {
             return self.inner.isTrackedAddress(address);
         }
