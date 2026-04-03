@@ -352,6 +352,7 @@ pub const InMemoryDB = struct {
         if (self.fallback) |fb| if (fb.notify_storage_read) |f| f(fb.ctx, address, slot);
     }
 
+
     /// Returns true if the address has any non-zero storage entry (O(1)).
     pub fn hasNonZeroStorageForAddress(self: *const Self, address: primitives.Address) bool {
         const count = self.nonzero_storage_count.get(address) orelse return false;
