@@ -26,7 +26,7 @@ pub const MainnetEvm = struct {
     evm: main.Evm,
 
     /// Get the execution context.
-    pub fn getContext(self: *MainnetEvm) *context.Context {
+    pub fn getContext(self: *MainnetEvm) *context.DefaultContext {
         return self.evm.ctx;
     }
 
@@ -53,7 +53,7 @@ pub const MainnetEvm = struct {
 };
 
 /// Mainnet context type alias
-pub const MainnetContext = context.Context;
+pub const MainnetContext = context.DefaultContext;
 
 /// Main builder
 pub const MainBuilder = struct {
@@ -87,16 +87,16 @@ pub const MainContext = struct {
     /// Create new mainnet context
     pub fn mainnet() MainnetContext {
         const db = database.InMemoryDB.init(alloc_mod.get());
-        return context.Context.new(db, primitives.SpecId.prague);
+        return context.DefaultContext.new(db, primitives.SpecId.prague);
     }
 };
 
 /// Mainnet handler — stateless, all methods are free functions grouped in a namespace.
-/// All functions accept `*main.Evm` so they work with both the heap-allocated `*MainnetEvm`
-/// (call `evm.execute()` or pass `&mevm.evm`) and stack-allocated test helpers.
+/// All functions accept `anytype` for `evm` so they work with EvmFor(any DB type),
+/// the heap-allocated `*MainnetEvm`, and stack-allocated test helpers.
 pub const MainnetHandler = struct {
     /// Validate transaction — environment checks (no DB access) then caller state check.
-    pub fn validate(evm: *main.Evm, initial_gas: *validation.InitialAndFloorGas) !void {
+    pub fn validate(evm: anytype, initial_gas: *validation.InitialAndFloorGas) !void {
         const ctx = evm.getContext();
 
         // 1. Validate block/tx/cfg fields (chain ID, gas cap, priority fee ordering)
@@ -120,7 +120,7 @@ pub const MainnetHandler = struct {
     /// Must run after validate() so the caller is already loaded and nonce bumped.
     /// Populates `initial_gas.auth_refund` with 12,500 (PER_EMPTY_ACCOUNT_COST/2) per valid
     /// EIP-7702 authorization where the authority account is non-empty (existing); 0 for new accounts.
-    pub fn preExecution(evm: *main.Evm, initial_gas: *validation.InitialAndFloorGas) !void {
+    pub fn preExecution(evm: anytype, initial_gas: *validation.InitialAndFloorGas) !void {
         const ctx = evm.getContext();
         const tx = &ctx.tx;
         const spec = ctx.cfg.spec;
@@ -261,7 +261,7 @@ pub const MainnetHandler = struct {
     }
 
     /// Execute the transaction frame — runs the interpreter against bytecode.
-    pub fn executeFrame(evm: *main.Evm, initial: validation.InitialAndFloorGas) !main.FrameResult {
+    pub fn executeFrame(evm: anytype, initial: validation.InitialAndFloorGas) !main.FrameResult {
         const ctx = evm.getContext();
         const tx = &ctx.tx;
         const spec = ctx.cfg.spec;
@@ -284,10 +284,8 @@ pub const MainnetHandler = struct {
         else
             0;
 
-        var host = interpreter_mod.Host{
-            .ctx = ctx,
-            .precompiles = &evm.precompiles.precompiles,
-        };
+        const DB = @TypeOf(ctx.*).DatabaseType;
+        var host = interpreter_mod.Host.init(DB, ctx, &evm.precompiles.precompiles);
 
         var return_data_buf: std.ArrayList(u8) = .{};
         defer return_data_buf.deinit(alloc_mod.get());
@@ -361,14 +359,14 @@ pub const MainnetHandler = struct {
                 // Take checkpoint for top-level CALL: state is reverted through this on failure.
                 const call_checkpoint = ctx.journaled_state.getCheckpoint();
                 // Notify db fallback that a new frame has opened (checkpoint-aware tracking).
-                ctx.journaled_state.database.snapshotFrame();
+                ctx.journaled_state.snapshotFrame();
 
                 // Value transfer for top-level CALL.
                 if (tx.value > 0) {
                     const xfer_err = try ctx.journaled_state.transfer(tx.caller, target, tx.value);
                     if (xfer_err != null) {
                         ctx.journaled_state.checkpointRevert(call_checkpoint);
-                        ctx.journaled_state.database.revertFrame();
+                        ctx.journaled_state.revertFrame();
                         return main.FrameResult.new(
                             main.ExecutionResult.new(.Fail, exec_gas),
                             0,
@@ -390,7 +388,7 @@ pub const MainnetHandler = struct {
                         .success => |out| {
                             if (out.reverted) {
                                 ctx.journaled_state.checkpointRevert(call_checkpoint);
-                                ctx.journaled_state.database.revertFrame();
+                                ctx.journaled_state.revertFrame();
                                 return main.FrameResult.new(
                                     main.ExecutionResult.new(.Revert, exec_gas),
                                     0,
@@ -398,7 +396,7 @@ pub const MainnetHandler = struct {
                                 );
                             }
                             ctx.journaled_state.checkpointCommit();
-                            ctx.journaled_state.database.commitFrame();
+                            ctx.journaled_state.commitFrame();
                             var fr = main.FrameResult.new(
                                 main.ExecutionResult.new(.Success, out.gas_used),
                                 tx_regular_exec_gas - out.gas_used,
@@ -409,7 +407,7 @@ pub const MainnetHandler = struct {
                         },
                         .err => {
                             ctx.journaled_state.checkpointRevert(call_checkpoint);
-                            ctx.journaled_state.database.revertFrame();
+                            ctx.journaled_state.revertFrame();
                             return main.FrameResult.new(
                                 main.ExecutionResult.new(.Fail, exec_gas),
                                 0,
@@ -442,10 +440,10 @@ pub const MainnetHandler = struct {
 
                 if (ir.raw_result.isSuccess()) {
                     ctx.journaled_state.checkpointCommit();
-                    ctx.journaled_state.database.commitFrame();
+                    ctx.journaled_state.commitFrame();
                 } else {
                     ctx.journaled_state.checkpointRevert(call_checkpoint);
-                    ctx.journaled_state.database.revertFrame();
+                    ctx.journaled_state.revertFrame();
                 }
 
                 const status: main.ExecutionStatus = switch (ir.raw_result) {
@@ -466,7 +464,7 @@ pub const MainnetHandler = struct {
     /// Post-execution phase — gas refund capping (EIP-3529), EIP-7623 floor, reimburse caller,
     /// reward beneficiary, and commit journal.
     pub fn postExecution(
-        evm: *main.Evm,
+        evm: anytype,
         result: *main.FrameResult,
         initial_gas: validation.InitialAndFloorGas,
     ) !void {
@@ -588,7 +586,7 @@ pub const MainnetHandler = struct {
                 var slot_it = entry.value_ptr.storage.iterator();
                 while (slot_it.next()) |slot| {
                     if (slot.value_ptr.present_value != slot.value_ptr.original_value) {
-                        js.database.notifyStorageSlotCommit(entry.key_ptr.*, slot.key_ptr.*, slot.value_ptr.present_value);
+                        js.notifyStorageSlotCommit(entry.key_ptr.*, slot.key_ptr.*, slot.value_ptr.present_value);
                     }
                 }
             }
@@ -596,7 +594,7 @@ pub const MainnetHandler = struct {
         js.commitTx();
         // Notify fallback database that this transaction committed.
         // WitnessDatabase uses this to flush per-tx pending tracking to the permanent access log.
-        js.database.commitTracking();
+        js.commitTracking();
 
         // 8. Update ExecutionResult with final accounting.
         // EIP-7778 (Amsterdam+): block gas does NOT deduct refunds.
@@ -630,12 +628,12 @@ pub const MainnetHandler = struct {
     }
 
     /// Handle errors — revert journal, discard tx.
-    pub fn catchError(evm: *main.Evm, _: anyerror) void {
+    pub fn catchError(evm: anytype, _: anyerror) void {
         const ctx = evm.getContext();
         // Revert all state changes from this transaction
         ctx.journaled_state.discardTx();
         // Notify fallback database that this transaction was discarded.
-        ctx.journaled_state.database.discardTracking();
+        ctx.journaled_state.discardTracking();
     }
 };
 
@@ -820,7 +818,7 @@ fn executeIterative(
 /// Accepts `*main.Evm` so it works with both heap-allocated `*MainnetEvm` (pass `&mevm.evm`)
 /// and stack-allocated test patterns (pass `&evm` directly).
 pub const ExecuteEvm = struct {
-    pub fn execute(evm: *main.Evm) !main.ExecutionResult {
+    pub fn execute(evm: anytype) !main.ExecutionResult {
         var initial_gas = validation.InitialAndFloorGas{ .initial_gas = 0, .floor_gas = 0 };
 
         // Validate (env checks + caller deduction)
@@ -854,7 +852,7 @@ pub const ExecuteEvm = struct {
 /// Execute commit EVM — execute then commit state to the underlying database.
 /// Note: commitTx() is called inside postExecution; no second commit needed here.
 pub const ExecuteCommitEvm = struct {
-    pub fn executeAndCommit(evm: *main.Evm) !main.ExecutionResult {
+    pub fn executeAndCommit(evm: anytype) !main.ExecutionResult {
         return ExecuteEvm.execute(evm);
     }
 };

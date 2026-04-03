@@ -381,7 +381,7 @@ pub fn opSstore(ctx: *InstructionContext) void {
     };
 
     // Compute gas cost using EIP-2200/EIP-2929/EIP-8037 rules
-    const block_gas_limit = h.ctx.block.gas_limit;
+    const block_gas_limit = h.block.gas_limit;
     const sstore_gas = gas_costs.getSstoreCost(spec, result.original, result.current, result.new, result.is_cold, block_gas_limit);
 
     if (!ctx.interpreter.gas.spend(sstore_gas.gas_cost)) {
@@ -645,7 +645,7 @@ pub fn opSelfdestruct(ctx: *InstructionContext) void {
     // NOTE: do NOT untrack target on state-gas OOG — the cold access was already charged
     // (regular gas passed above), so the target was genuinely accessed and belongs in the BAL.
     if (selfdestruct_charges_new_account and primitives.isEnabledIn(spec, .amsterdam)) {
-        const cpsb = gas_costs.costPerStateByte(h.ctx.block.gas_limit);
+        const cpsb = gas_costs.costPerStateByte(h.block.gas_limit);
         if (!ctx.interpreter.gas.spendStateGas(gas_costs.STATE_BYTES_PER_NEW_ACCOUNT * cpsb)) {
             ctx.interpreter.halt(.out_of_gas);
             return;

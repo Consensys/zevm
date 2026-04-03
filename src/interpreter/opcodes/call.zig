@@ -214,7 +214,7 @@ fn callImpl(
         if (primitives.isEnabledIn(spec, .amsterdam) and transfers_value and !account_exists and
             ctx.interpreter.input.depth < MAX_CALL_DEPTH)
         {
-            const cpsb = gas_costs.costPerStateByte(h.ctx.block.gas_limit);
+            const cpsb = gas_costs.costPerStateByte(h.block.gas_limit);
             break :blk gas_costs.STATE_BYTES_PER_NEW_ACCOUNT * cpsb;
         }
         break :blk 0;
@@ -493,7 +493,7 @@ pub fn opCreate(ctx: *InstructionContext) void {
     // EIP-8037 (Amsterdam+): charge state gas for new account creation.
     // Charged BEFORE forwarded gas is computed so `remaining` reflects the state gas cost.
     if (primitives.isEnabledIn(spec, .amsterdam)) {
-        const cpsb = gas_costs.costPerStateByte(h.ctx.block.gas_limit);
+        const cpsb = gas_costs.costPerStateByte(h.block.gas_limit);
         if (!ctx.interpreter.gas.spendStateGas(gas_costs.STATE_BYTES_PER_NEW_ACCOUNT * cpsb)) {
             ctx.interpreter.halt(.out_of_gas);
             return;
@@ -635,7 +635,7 @@ pub fn opCreate2(ctx: *InstructionContext) void {
     // EIP-8037 (Amsterdam+): charge state gas for new account creation.
     // Charged BEFORE forwarded gas is computed so `remaining` reflects the state gas cost.
     if (primitives.isEnabledIn(spec, .amsterdam)) {
-        const cpsb = gas_costs.costPerStateByte(h.ctx.block.gas_limit);
+        const cpsb = gas_costs.costPerStateByte(h.block.gas_limit);
         if (!ctx.interpreter.gas.spendStateGas(gas_costs.STATE_BYTES_PER_NEW_ACCOUNT * cpsb)) {
             ctx.interpreter.halt(.out_of_gas);
             return;

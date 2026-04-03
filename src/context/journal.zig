@@ -1257,7 +1257,7 @@ pub fn Journal(comptime DB: type) type {
             return self.inner;
         }
 
-        pub fn getDb(self: @This()) *const DB {
+        pub fn getDb(self: *const @This()) *const DB {
             return &self.database;
         }
 
@@ -1422,13 +1422,50 @@ pub fn Journal(comptime DB: type) type {
         /// Un-record a pending address access in the database fallback.
         /// Called when a CALL loaded an address for gas calculation but went OOG.
         pub fn untrackAddress(self: *@This(), address: primitives.Address) void {
-            self.getDbMut().untrackAddress(address);
+            if (comptime @hasDecl(DB, "untrackAddress")) self.getDbMut().untrackAddress(address);
         }
 
         /// Force-add an address to the current-tx access log in the database fallback.
         /// Used for EIP-7702 delegation targets that execute but are not in the witness.
         pub fn forceTrackAddress(self: *@This(), address: primitives.Address) void {
-            self.getDbMut().forceTrackAddress(address);
+            if (comptime @hasDecl(DB, "forceTrackAddress")) self.getDbMut().forceTrackAddress(address);
+        }
+
+        /// Notify the DB that a new call frame is starting (EIP-7928 BAL tracking).
+        pub fn snapshotFrame(self: *@This()) void {
+            if (comptime @hasDecl(DB, "snapshotFrame")) self.getDbMut().snapshotFrame();
+        }
+
+        /// Commit the current call frame's accesses to the parent frame (EIP-7928).
+        pub fn commitFrame(self: *@This()) void {
+            if (comptime @hasDecl(DB, "commitFrame")) self.getDbMut().commitFrame();
+        }
+
+        /// Revert the current call frame's accesses (EIP-7928, on revert/OOG).
+        pub fn revertFrame(self: *@This()) void {
+            if (comptime @hasDecl(DB, "revertFrame")) self.getDbMut().revertFrame();
+        }
+
+        /// Commit all tracked accesses for this transaction to the block-level BAL.
+        pub fn commitTracking(self: *@This()) void {
+            if (comptime @hasDecl(DB, "commitTracking")) self.getDbMut().commitTracking();
+        }
+
+        /// Discard all tracked accesses for this transaction (on tx revert/failure).
+        pub fn discardTracking(self: *@This()) void {
+            if (comptime @hasDecl(DB, "discardTracking")) self.getDbMut().discardTracking();
+        }
+
+        /// Notify the DB that a storage slot was committed (EIP-7928 write tracking).
+        pub fn notifyStorageSlotCommit(self: *@This(), addr: primitives.Address, key: primitives.StorageKey, val: primitives.StorageValue) void {
+            if (comptime @hasDecl(DB, "notifyStorageSlotCommit")) self.getDbMut().notifyStorageSlotCommit(addr, key, val);
+        }
+
+        /// Returns true if the address has any non-zero storage in the DB.
+        /// Used by CREATE collision check; returns false for DB types without this method.
+        pub fn hasNonZeroStorageForAddress(self: *const @This(), addr: primitives.Address) bool {
+            if (comptime @hasDecl(DB, "hasNonZeroStorageForAddress")) return self.getDb().hasNonZeroStorageForAddress(addr);
+            return false;
         }
 
         /// Check whether an address is already in the EVM state cache (was loaded before
