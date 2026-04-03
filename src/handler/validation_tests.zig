@@ -60,13 +60,13 @@ test "floor gas: zero for empty calldata on Prague" {
 // Caller deduction / nonce tests
 // -------------------------------------------------------------------------
 
-fn makeEvm(db: database.InMemoryDB, spec: primitives.SpecId) struct {
+fn makeEvm(db: *database.InMemoryDB, spec: primitives.SpecId) struct {
     ctx: context.DefaultContext,
     instructions: handler_main.Instructions,
     precompiles: handler_main.Precompiles,
     frame_stack: handler_main.FrameStack,
 } {
-    const ctx = context.DefaultContext.new(db, spec);
+    const ctx = context.DefaultContext.new(database.Database.forDb(database.InMemoryDB, db), spec);
     return .{
         .ctx = ctx,
         .instructions = handler_main.Instructions.new(spec),
@@ -88,7 +88,7 @@ test "validateAgainstStateAndDeductCaller: deducts gas_fee and bumps nonce" {
         .code = null,
     });
 
-    var parts = makeEvm(db, primitives.SpecId.prague);
+    var parts = makeEvm(&db, primitives.SpecId.prague);
     var evm = handler_main.Evm.init(&parts.ctx, null, &parts.instructions, &parts.precompiles, &parts.frame_stack);
 
     parts.ctx.tx.caller = caller;
@@ -121,7 +121,7 @@ test "validateAgainstStateAndDeductCaller: insufficient balance returns error" {
         .code = null,
     });
 
-    var parts = makeEvm(db, primitives.SpecId.prague);
+    var parts = makeEvm(&db, primitives.SpecId.prague);
     var evm = handler_main.Evm.init(&parts.ctx, null, &parts.instructions, &parts.precompiles, &parts.frame_stack);
     parts.ctx.tx.caller = caller;
     parts.ctx.tx.gas_limit = 21000;
@@ -144,7 +144,7 @@ test "validateAgainstStateAndDeductCaller: nonce mismatch returns error" {
         .code = null,
     });
 
-    var parts = makeEvm(db, primitives.SpecId.prague);
+    var parts = makeEvm(&db, primitives.SpecId.prague);
     var evm = handler_main.Evm.init(&parts.ctx, null, &parts.instructions, &parts.precompiles, &parts.frame_stack);
     parts.ctx.tx.caller = caller;
     parts.ctx.tx.gas_limit = 21000;
@@ -169,7 +169,7 @@ test "validateAgainstStateAndDeductCaller: EIP-3607 rejects account with code" {
         .code = null,
     });
 
-    var parts = makeEvm(db, primitives.SpecId.prague);
+    var parts = makeEvm(&db, primitives.SpecId.prague);
     var evm = handler_main.Evm.init(&parts.ctx, null, &parts.instructions, &parts.precompiles, &parts.frame_stack);
     parts.ctx.tx.caller = caller;
     parts.ctx.tx.gas_limit = 21000;

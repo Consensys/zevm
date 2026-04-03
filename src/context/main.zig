@@ -27,6 +27,7 @@ pub const ContextError = @import("context.zig").ContextError;
 pub const LocalContext = @import("local.zig").LocalContext;
 pub const Context = @import("context.zig").Context;
 pub const DefaultContext = @import("context.zig").DefaultContext;
+pub const Database = @import("database").Database;
 pub const Evm = @import("evm.zig").Evm;
 
 // Re-export all context types
@@ -113,7 +114,7 @@ pub const testing = struct {
         var db = database.InMemoryDB.init(allocator);
         defer db.deinit();
 
-        const ctx = DefaultContext.new(db, primitives.SpecId.prague);
+        const ctx = DefaultContext.new(database.Database.forDb(database.InMemoryDB, &db), primitives.SpecId.prague);
         std.debug.assert(ctx.block.number == @as(primitives.U256, 0));
         std.debug.assert(ctx.tx.tx_type == 0);
         std.debug.assert(ctx.cfg.spec == primitives.SpecId.prague);
@@ -133,7 +134,7 @@ pub const testing = struct {
         var db = database.InMemoryDB.init(allocator);
         defer db.deinit();
 
-        const ctx = DefaultContext.new(db, primitives.SpecId.prague);
+        const ctx = DefaultContext.new(database.Database.forDb(database.InMemoryDB, &db), primitives.SpecId.prague);
         const evm = Evm.new(ctx, {}, {});
 
         std.debug.assert(evm.ctx.block.number == @as(primitives.U256, 0));

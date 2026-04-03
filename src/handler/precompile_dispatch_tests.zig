@@ -34,14 +34,14 @@ const SHA256_ADDR: primitives.Address = blk: {
     break :blk a;
 };
 
-fn makeEvmParts(db: database.InMemoryDB, spec: primitives.SpecId) struct {
+fn makeEvmParts(db: *database.InMemoryDB, spec: primitives.SpecId) struct {
     ctx: context.DefaultContext,
     instructions: handler_main.Instructions,
     precompiles: handler_main.Precompiles,
     frame_stack: handler_main.FrameStack,
 } {
     return .{
-        .ctx = context.DefaultContext.new(db, spec),
+        .ctx = context.DefaultContext.new(database.Database.forDb(database.InMemoryDB, db), spec),
         .instructions = handler_main.Instructions.new(spec),
         .precompiles = handler_main.Precompiles.new(spec),
         .frame_stack = handler_main.FrameStack.new(),
@@ -66,7 +66,7 @@ test "precompile dispatch: IDENTITY returns input unchanged" {
 
     var db = database.InMemoryDB.init(ALLOC);
     try insertCaller(&db, CALLER, 1_000_000, 0);
-    var parts = makeEvmParts(db, .prague);
+    var parts = makeEvmParts(&db, .prague);
     _ = try parts.ctx.journaled_state.loadAccount(CALLER);
     _ = try parts.ctx.journaled_state.loadAccount(IDENTITY_ADDR);
 
@@ -95,7 +95,7 @@ test "precompile dispatch: IDENTITY returns input unchanged" {
 test "precompile dispatch: IDENTITY with no data returns empty" {
     var db = database.InMemoryDB.init(ALLOC);
     try insertCaller(&db, CALLER, 1_000_000, 0);
-    var parts = makeEvmParts(db, .prague);
+    var parts = makeEvmParts(&db, .prague);
     _ = try parts.ctx.journaled_state.loadAccount(CALLER);
     _ = try parts.ctx.journaled_state.loadAccount(IDENTITY_ADDR);
 
@@ -122,7 +122,7 @@ test "precompile dispatch: IDENTITY with no data returns empty" {
 test "precompile dispatch: out-of-gas fails and consumes all gas" {
     var db = database.InMemoryDB.init(ALLOC);
     try insertCaller(&db, CALLER, 1_000_000, 0);
-    var parts = makeEvmParts(db, .prague);
+    var parts = makeEvmParts(&db, .prague);
     _ = try parts.ctx.journaled_state.loadAccount(CALLER);
     _ = try parts.ctx.journaled_state.loadAccount(IDENTITY_ADDR);
 
@@ -150,7 +150,7 @@ test "precompile dispatch: null precompiles falls back to interpreter (no precom
     // IDENTITY address with null precompiles → runs as empty contract → stop with empty return.
     var db = database.InMemoryDB.init(ALLOC);
     try insertCaller(&db, CALLER, 1_000_000, 0);
-    var parts = makeEvmParts(db, .prague);
+    var parts = makeEvmParts(&db, .prague);
     _ = try parts.ctx.journaled_state.loadAccount(CALLER);
     _ = try parts.ctx.journaled_state.loadAccount(IDENTITY_ADDR);
 
@@ -194,7 +194,7 @@ test "executeFrame: CREATE tx with STOP init code deploys successfully" {
         .code = null,
     });
 
-    var parts = makeEvmParts(db, .prague);
+    var parts = makeEvmParts(&db, .prague);
     var evm = handler_main.Evm.init(
         &parts.ctx,
         null,
@@ -240,7 +240,7 @@ test "executeFrame: CREATE tx with REVERT init code fails gracefully" {
         .code = null,
     });
 
-    var parts = makeEvmParts(db, .prague);
+    var parts = makeEvmParts(&db, .prague);
     var evm = handler_main.Evm.init(
         &parts.ctx,
         null,

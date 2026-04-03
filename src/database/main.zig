@@ -19,6 +19,61 @@ pub const BENCH_CALLER: primitives.Address = EEADDRESS;
 /// BENCH_CALLER_BALANCE balance
 pub const BENCH_CALLER_BALANCE: primitives.U256 = TEST_BALANCE;
 
+/// Type-erased database vtable. Holds a raw pointer to any concrete DB and function pointers
+/// for the 4 required methods. Construct via `Database.forDb(comptime T, *T)`.
+pub const Database = struct {
+    ptr: *anyopaque,
+    basicFn: *const fn (*anyopaque, primitives.Address) anyerror!?state.AccountInfo,
+    codeByHashFn: *const fn (*anyopaque, primitives.Hash) anyerror!bytecode.Bytecode,
+    storageFn: *const fn (*anyopaque, primitives.Address, primitives.StorageKey) anyerror!primitives.StorageValue,
+    blockHashFn: *const fn (*anyopaque, u64) anyerror!primitives.Hash,
+    hasNonZeroStorageFn: ?*const fn (*anyopaque, primitives.Address) bool,
+
+    pub fn forDb(comptime T: type, db: *T) Database {
+        const Fns = struct {
+            fn basic(ptr: *anyopaque, addr: primitives.Address) anyerror!?state.AccountInfo {
+                return @as(*T, @ptrCast(@alignCast(ptr))).basic(addr);
+            }
+            fn codeByHash(ptr: *anyopaque, hash: primitives.Hash) anyerror!bytecode.Bytecode {
+                return @as(*T, @ptrCast(@alignCast(ptr))).codeByHash(hash);
+            }
+            fn storage(ptr: *anyopaque, addr: primitives.Address, key: primitives.StorageKey) anyerror!primitives.StorageValue {
+                return @as(*T, @ptrCast(@alignCast(ptr))).storage(addr, key);
+            }
+            fn blockHash(ptr: *anyopaque, num: u64) anyerror!primitives.Hash {
+                return @as(*T, @ptrCast(@alignCast(ptr))).blockHash(num);
+            }
+            fn hasNonZeroStorage(ptr: *anyopaque, addr: primitives.Address) bool {
+                return @as(*T, @ptrCast(@alignCast(ptr))).hasNonZeroStorageForAddress(addr);
+            }
+        };
+        return .{
+            .ptr = db,
+            .basicFn = Fns.basic,
+            .codeByHashFn = Fns.codeByHash,
+            .storageFn = Fns.storage,
+            .blockHashFn = Fns.blockHash,
+            .hasNonZeroStorageFn = if (comptime @hasDecl(T, "hasNonZeroStorageForAddress")) Fns.hasNonZeroStorage else null,
+        };
+    }
+
+    pub fn basic(self: *Database, addr: primitives.Address) !?state.AccountInfo {
+        return self.basicFn(self.ptr, addr);
+    }
+    pub fn codeByHash(self: *Database, hash: primitives.Hash) !bytecode.Bytecode {
+        return self.codeByHashFn(self.ptr, hash);
+    }
+    pub fn storage(self: *Database, addr: primitives.Address, key: primitives.StorageKey) !primitives.StorageValue {
+        return self.storageFn(self.ptr, addr, key);
+    }
+    pub fn blockHash(self: *Database, num: u64) !primitives.Hash {
+        return self.blockHashFn(self.ptr, num);
+    }
+    pub fn hasNonZeroStorageForAddress(self: *const Database, addr: primitives.Address) bool {
+        return if (self.hasNonZeroStorageFn) |f| f(self.ptr, addr) else false;
+    }
+};
+
 /// Database error marker
 pub fn DBErrorMarker(comptime T: type) type {
     return struct {
@@ -29,8 +84,8 @@ pub fn DBErrorMarker(comptime T: type) type {
     };
 }
 
-/// EVM database interface.
-pub fn Database(comptime Self: type) type {
+/// EVM database interface (trait definition — not used by the vtable approach).
+pub fn DatabaseTrait(comptime Self: type) type {
     return struct {
         const DatabaseTrait = @This();
 
@@ -215,9 +270,9 @@ const StorageKeyContext = struct {
 ///
 /// Pre-populate with `insertAccount`, `insertCode`, `insertStorage`, `insertBlockHash`
 /// before execution. Any DB type satisfying the 4-method interface (basic, codeByHash,
-/// storage, blockHash) can be used in place of this via `Context(DB)`. Tracking methods
-/// (snapshotFrame, commitFrame, etc.) are opt-in: implement them on your DB type and
-/// they will be activated automatically via @hasDecl in the Journal wrappers.
+/// storage, blockHash) can be wrapped via `Database.forDb(T, &db)` for use in `Context`.
+/// The optional `hasNonZeroStorageForAddress` method is detected at compile time via
+/// `@hasDecl` and routed through the vtable's `hasNonZeroStorageFn` field.
 pub const InMemoryDB = struct {
     accounts: std.AutoHashMap(primitives.Address, state.AccountInfo),
     code: std.AutoHashMap(primitives.Hash, bytecode.Bytecode),

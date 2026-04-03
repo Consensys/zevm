@@ -22,14 +22,14 @@ const CALLER: primitives.Address = [_]u8{0xAA} ** 20;
 const CALLEE: primitives.Address = [_]u8{0xBB} ** 20;
 const COINBASE: primitives.Address = [_]u8{0xCB} ** 20;
 
-fn makeParts(db: database.InMemoryDB, spec: primitives.SpecId) struct {
+fn makeParts(db: *database.InMemoryDB, spec: primitives.SpecId) struct {
     ctx: context.DefaultContext,
     instructions: handler_main.Instructions,
     precompiles: handler_main.Precompiles,
     frame_stack: handler_main.FrameStack,
 } {
     return .{
-        .ctx = context.DefaultContext.new(db, spec),
+        .ctx = context.DefaultContext.new(database.Database.forDb(database.InMemoryDB, db), spec),
         .instructions = handler_main.Instructions.new(spec),
         .precompiles = handler_main.Precompiles.new(spec),
         .frame_stack = handler_main.FrameStack.new(),
@@ -99,7 +99,7 @@ test "SSTORE EIP-2200: fails when gas_remaining <= 2300 (Istanbul+)" {
     try insertEoa(&db, CALLER, 1_000_000_000_000_000_000, 0);
     try insertContract(&db, CALLEE, &sstore_code);
 
-    var parts = makeParts(db, .istanbul);
+    var parts = makeParts(&db, .istanbul);
     _ = try parts.ctx.journaled_state.loadAccount(CALLER);
     _ = try parts.ctx.journaled_state.loadAccount(CALLEE);
 
@@ -128,7 +128,7 @@ test "SSTORE EIP-2200: succeeds with sufficient gas" {
     try insertEoa(&db, CALLER, 1_000_000_000_000_000_000, 0);
     try insertContract(&db, CALLEE, &sstore_code);
 
-    var parts = makeParts(db, .istanbul);
+    var parts = makeParts(&db, .istanbul);
     _ = try parts.ctx.journaled_state.loadAccount(CALLER);
     _ = try parts.ctx.journaled_state.loadAccount(CALLEE);
 
@@ -163,7 +163,7 @@ test "gas refund propagation: SSTORE clear in sub-call surfaces in CallResult" {
     try insertEoa(&db, CALLER, 1_000_000_000_000_000_000, 0);
     try insertContract(&db, CALLEE, &clear_code);
 
-    var parts = makeParts(db, .berlin);
+    var parts = makeParts(&db, .berlin);
     _ = try parts.ctx.journaled_state.loadAccount(CALLER);
     _ = try parts.ctx.journaled_state.loadAccount(CALLEE);
 
@@ -202,7 +202,7 @@ test "full tx: plain ETH transfer to EOA succeeds and uses exactly 21000 gas" {
     try insertEoa(&db, CALLER, initial_balance, 0);
     try insertEoa(&db, CALLEE, 0, 0);
 
-    var parts = makeParts(db, .prague);
+    var parts = makeParts(&db, .prague);
     var evm = handler_main.Evm.init(
         &parts.ctx,
         null,

@@ -84,15 +84,17 @@ pub const MainBuilder = struct {
 
 /// Main context
 pub const MainContext = struct {
-    /// Create new mainnet context
+    /// Create new mainnet context.
+    /// Note: The returned context holds a vtable pointer to a heap-allocated InMemoryDB.
     pub fn mainnet() MainnetContext {
-        const db = database.InMemoryDB.init(alloc_mod.get());
-        return context.DefaultContext.new(db, primitives.SpecId.prague);
+        const db_ptr = alloc_mod.get().create(database.InMemoryDB) catch @panic("OOM in MainContext.mainnet");
+        db_ptr.* = database.InMemoryDB.init(alloc_mod.get());
+        return context.DefaultContext.new(database.Database.forDb(database.InMemoryDB, db_ptr), primitives.SpecId.prague);
     }
 };
 
 /// Mainnet handler — stateless, all methods are free functions grouped in a namespace.
-/// All functions accept `anytype` for `evm` so they work with EvmFor(any DB type),
+/// All functions accept `anytype` for `evm` so they work with `Evm`,
 /// the heap-allocated `*MainnetEvm`, and stack-allocated test helpers.
 pub const MainnetHandler = struct {
     /// Validate transaction — environment checks (no DB access) then caller state check.
@@ -284,8 +286,7 @@ pub const MainnetHandler = struct {
         else
             0;
 
-        const DB = @TypeOf(ctx.*).DatabaseType;
-        var host = interpreter_mod.Host.init(DB, ctx, &evm.precompiles.precompiles);
+        var host = interpreter_mod.Host.init(ctx, &evm.precompiles.precompiles);
 
         var return_data_buf: std.ArrayList(u8) = .{};
         defer return_data_buf.deinit(alloc_mod.get());

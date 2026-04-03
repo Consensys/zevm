@@ -3,10 +3,16 @@ const primitives = @import("primitives");
 const state = @import("state");
 const bytecode = @import("bytecode");
 const database = @import("database");
+const database_mod = database;
 const BlockEnv = @import("block.zig").BlockEnv;
 const TxEnv = @import("tx.zig").TxEnv;
 const CfgEnv = @import("cfg.zig").CfgEnv;
-const Journal = @import("journal.zig").Journal;
+const journal_mod = @import("journal.zig");
+const Journal = journal_mod.Journal;
+const StateLoad = journal_mod.StateLoad;
+const SStoreResult = journal_mod.SStoreResult;
+const SelfDestructResult = journal_mod.SelfDestructResult;
+const AccountInfoLoad = journal_mod.AccountInfoLoad;
 const LocalContext = @import("local.zig").LocalContext;
 
 /// Context error type
@@ -123,514 +129,472 @@ pub const ContextError = enum {
     invalid_extra_data_bloom,
 };
 
-/// EVM context parameterised over the database type.
+/// EVM context using a type-erased Database vtable.
 ///
-/// Use `DefaultContext` for the standard in-memory database. Pass any type that
-/// implements `basic`, `codeByHash`, `storage`, and `blockHash` to get a
-/// fully-typed context with zero overhead. Tracking methods (`snapshotFrame`,
-/// `commitTracking`, etc.) are detected at compile time via `@hasDecl` in the
-/// Journal wrappers and become no-ops for database types that do not implement them.
-pub fn Context(comptime DB: type) type {
-    return struct {
-        /// Exposes the DB type so callers can extract it via @TypeOf(ctx.*).DatabaseType.
-        pub const DatabaseType = DB;
-        /// Block information.
-        block: BlockEnv,
-        /// Transaction information.
-        tx: TxEnv,
-        /// Configurations.
-        cfg: CfgEnv,
-        /// EVM State with journaling support and database.
-        journaled_state: Journal(DB),
-        /// Inner context.
-        chain: void,
-        /// Local context that is filled by execution.
-        local: LocalContext,
-        /// Error that happened during execution.
-        ctx_error: ContextError,
+/// Use `Context.new(database_mod.Database.forDb(MyDB, &my_db), spec)` to create a context
+/// backed by any concrete DB type. Use `DefaultContext` (an alias for `Context`) for convenience.
+pub const Context = struct {
+    /// Block information.
+    block: BlockEnv,
+    /// Transaction information.
+    tx: TxEnv,
+    /// Configurations.
+    cfg: CfgEnv,
+    /// EVM State with journaling support and database.
+    journaled_state: Journal,
+    /// Inner context.
+    chain: void,
+    /// Local context that is filled by execution.
+    local: LocalContext,
+    /// Error that happened during execution.
+    ctx_error: ContextError,
 
-        pub fn new(database_param: DB, spec: primitives.SpecId) @This() {
-            var journaled_state = Journal(DB).new(database_param);
-            journaled_state.setSpecId(spec);
-            return .{
-                .tx = TxEnv.default(),
-                .block = BlockEnv.default(),
-                .cfg = CfgEnv.newWithSpec(spec),
-                .local = LocalContext.default(),
-                .journaled_state = journaled_state,
-                .chain = {},
-                .ctx_error = ContextError.ok,
-            };
-        }
+    pub fn new(database_param: database_mod.Database, spec: primitives.SpecId) Context {
+        var journaled_state = Journal.new(database_param);
+        journaled_state.setSpecId(spec);
+        return .{
+            .tx = TxEnv.default(),
+            .block = BlockEnv.default(),
+            .cfg = CfgEnv.newWithSpec(spec),
+            .local = LocalContext.default(),
+            .journaled_state = journaled_state,
+            .chain = {},
+            .ctx_error = ContextError.ok,
+        };
+    }
 
-        /// Creates a new context with a new journal (same DB type).
-        pub fn withNewJournal(self: @This(), new_journal_param: Journal(DB)) @This() {
-            var new_journal = new_journal_param;
-            new_journal.setSpecId(self.cfg.spec());
-            return .{
-                .tx = self.tx,
-                .block = self.block,
-                .cfg = self.cfg,
-                .journaled_state = new_journal,
-                .local = self.local,
-                .chain = self.chain,
-                .ctx_error = ContextError.ok,
-            };
-        }
+    /// Creates a new context with a new journal.
+    pub fn withNewJournal(self: Context, new_journal_param: Journal) Context {
+        var new_journal = new_journal_param;
+        new_journal.setSpecId(self.cfg.spec());
+        return .{
+            .tx = self.tx,
+            .block = self.block,
+            .cfg = self.cfg,
+            .journaled_state = new_journal,
+            .local = self.local,
+            .chain = self.chain,
+            .ctx_error = ContextError.ok,
+        };
+    }
 
-        /// Creates a new context with a different database type.
-        pub fn withDb(self: @This(), database_param: anytype) Context(@TypeOf(database_param)) {
-            const NewDB = @TypeOf(database_param);
-            const spec = self.cfg.spec();
-            var journaled_state = Journal(NewDB).new(database_param);
-            journaled_state.setSpecId(spec);
-            return .{
-                .tx = self.tx,
-                .block = self.block,
-                .cfg = self.cfg,
-                .journaled_state = journaled_state,
-                .local = self.local,
-                .chain = self.chain,
-                .ctx_error = ContextError.ok,
-            };
-        }
+    /// Creates a new context with a new block type.
+    pub fn withBlock(self: Context, block: BlockEnv) Context {
+        return .{
+            .tx = self.tx,
+            .block = block,
+            .cfg = self.cfg,
+            .journaled_state = self.journaled_state,
+            .local = self.local,
+            .chain = self.chain,
+            .ctx_error = ContextError.ok,
+        };
+    }
 
-        /// Creates a new context wrapping a `DatabaseRef` implementation.
-        pub fn withRefDb(self: @This(), db_ref: anytype) Context(database.WrapDatabaseRef(@TypeOf(db_ref))) {
-            const Wrapped = database.WrapDatabaseRef(@TypeOf(db_ref));
-            const spec = self.cfg.spec();
-            var journaled_state = Journal(Wrapped).new(Wrapped.init(db_ref));
-            journaled_state.setSpecId(spec);
-            return .{
-                .tx = self.tx,
-                .block = self.block,
-                .cfg = self.cfg,
-                .journaled_state = journaled_state,
-                .local = self.local,
-                .chain = self.chain,
-                .ctx_error = ContextError.ok,
-            };
-        }
+    /// Creates a new context with a new transaction type.
+    pub fn withTx(self: Context, tx: TxEnv) Context {
+        return .{
+            .tx = tx,
+            .block = self.block,
+            .cfg = self.cfg,
+            .journaled_state = self.journaled_state,
+            .local = self.local,
+            .chain = self.chain,
+            .ctx_error = ContextError.ok,
+        };
+    }
 
-        /// Creates a new context with a new block type.
-        pub fn withBlock(self: @This(), block: BlockEnv) @This() {
-            return .{
-                .tx = self.tx,
-                .block = block,
-                .cfg = self.cfg,
-                .journaled_state = self.journaled_state,
-                .local = self.local,
-                .chain = self.chain,
-                .ctx_error = ContextError.ok,
-            };
-        }
+    /// Creates a new context with a new chain type.
+    pub fn withChain(self: Context, chain: anytype) Context {
+        return .{
+            .tx = self.tx,
+            .block = self.block,
+            .cfg = self.cfg,
+            .journaled_state = self.journaled_state,
+            .local = self.local,
+            .chain = chain,
+            .ctx_error = ContextError.ok,
+        };
+    }
 
-        /// Creates a new context with a new transaction type.
-        pub fn withTx(self: @This(), tx: TxEnv) @This() {
-            return .{
-                .tx = tx,
-                .block = self.block,
-                .cfg = self.cfg,
-                .journaled_state = self.journaled_state,
-                .local = self.local,
-                .chain = self.chain,
-                .ctx_error = ContextError.ok,
-            };
-        }
+    pub fn withCfg(self: Context, cfg: CfgEnv) Context {
+        var new_cfg = cfg;
+        _ = new_cfg.spec();
+        return .{
+            .tx = self.tx,
+            .block = self.block,
+            .cfg = new_cfg,
+            .journaled_state = self.journaled_state,
+            .local = self.local,
+            .chain = self.chain,
+            .ctx_error = ContextError.ok,
+        };
+    }
 
-        /// Creates a new context with a new chain type.
-        pub fn withChain(self: @This(), chain: anytype) @This() {
-            return .{
-                .tx = self.tx,
-                .block = self.block,
-                .cfg = self.cfg,
-                .journaled_state = self.journaled_state,
-                .local = self.local,
-                .chain = chain,
-                .ctx_error = ContextError.ok,
-            };
-        }
+    /// Creates a new context with a new local context type.
+    pub fn withLocal(self: Context, local: LocalContext) Context {
+        return .{
+            .tx = self.tx,
+            .block = self.block,
+            .cfg = self.cfg,
+            .journaled_state = self.journaled_state,
+            .local = local,
+            .chain = self.chain,
+            .ctx_error = ContextError.ok,
+        };
+    }
 
-        pub fn withCfg(self: @This(), cfg: CfgEnv) @This() {
-            var new_cfg = cfg;
-            _ = new_cfg.spec();
-            return .{
-                .tx = self.tx,
-                .block = self.block,
-                .cfg = new_cfg,
-                .journaled_state = self.journaled_state,
-                .local = self.local,
-                .chain = self.chain,
-                .ctx_error = ContextError.ok,
-            };
-        }
+    /// Modifies the context configuration.
+    pub fn modifyCfgChained(self: Context, f: fn (*CfgEnv) void) Context {
+        var new_cfg = self.cfg;
+        f(&new_cfg);
+        return .{
+            .tx = self.tx,
+            .block = self.block,
+            .cfg = new_cfg,
+            .journaled_state = self.journaled_state,
+            .local = self.local,
+            .chain = self.chain,
+            .ctx_error = ContextError.ok,
+        };
+    }
 
-        /// Creates a new context with a new local context type.
-        pub fn withLocal(self: @This(), local: LocalContext) @This() {
-            return .{
-                .tx = self.tx,
-                .block = self.block,
-                .cfg = self.cfg,
-                .journaled_state = self.journaled_state,
-                .local = local,
-                .chain = self.chain,
-                .ctx_error = ContextError.ok,
-            };
-        }
+    /// Modifies the context block.
+    pub fn modifyBlockChained(self: Context, f: fn (*BlockEnv) void) Context {
+        var new_block = self.block;
+        f(&new_block);
+        return .{
+            .tx = self.tx,
+            .block = new_block,
+            .cfg = self.cfg,
+            .journaled_state = self.journaled_state,
+            .local = self.local,
+            .chain = self.chain,
+            .ctx_error = ContextError.ok,
+        };
+    }
 
-        /// Modifies the context configuration.
-        pub fn modifyCfgChained(self: @This(), f: fn (*CfgEnv) void) @This() {
-            var new_cfg = self.cfg;
-            f(&new_cfg);
-            return .{
-                .tx = self.tx,
-                .block = self.block,
-                .cfg = new_cfg,
-                .journaled_state = self.journaled_state,
-                .local = self.local,
-                .chain = self.chain,
-                .ctx_error = ContextError.ok,
-            };
-        }
+    /// Modifies the context transaction.
+    pub fn modifyTxChained(self: Context, f: fn (*TxEnv) void) Context {
+        var new_tx = self.tx;
+        f(&new_tx);
+        return .{
+            .tx = new_tx,
+            .block = self.block,
+            .cfg = self.cfg,
+            .journaled_state = self.journaled_state,
+            .local = self.local,
+            .chain = self.chain,
+            .ctx_error = ContextError.ok,
+        };
+    }
 
-        /// Modifies the context block.
-        pub fn modifyBlockChained(self: @This(), f: fn (*BlockEnv) void) @This() {
-            var new_block = self.block;
-            f(&new_block);
-            return .{
-                .tx = self.tx,
-                .block = new_block,
-                .cfg = self.cfg,
-                .journaled_state = self.journaled_state,
-                .local = self.local,
-                .chain = self.chain,
-                .ctx_error = ContextError.ok,
-            };
-        }
+    /// Modifies the context chain.
+    pub fn modifyChainChained(self: Context, f: fn (*void) void) Context {
+        var new_chain = self.chain;
+        f(&new_chain);
+        return .{
+            .tx = self.tx,
+            .block = self.block,
+            .cfg = self.cfg,
+            .journaled_state = self.journaled_state,
+            .local = self.local,
+            .chain = new_chain,
+            .ctx_error = ContextError.ok,
+        };
+    }
 
-        /// Modifies the context transaction.
-        pub fn modifyTxChained(self: @This(), f: fn (*TxEnv) void) @This() {
-            var new_tx = self.tx;
-            f(&new_tx);
-            return .{
-                .tx = new_tx,
-                .block = self.block,
-                .cfg = self.cfg,
-                .journaled_state = self.journaled_state,
-                .local = self.local,
-                .chain = self.chain,
-                .ctx_error = ContextError.ok,
-            };
-        }
+    /// Modifies the context database.
+    pub fn modifyDbChained(self: Context, f: fn (*database_mod.Database) void) Context {
+        f(&self.journaled_state.database);
+        return .{
+            .tx = self.tx,
+            .block = self.block,
+            .cfg = self.cfg,
+            .journaled_state = self.journaled_state,
+            .local = self.local,
+            .chain = self.chain,
+            .ctx_error = ContextError.ok,
+        };
+    }
 
-        /// Modifies the context chain.
-        pub fn modifyChainChained(self: @This(), f: fn (*@TypeOf(self.chain)) void) @This() {
-            var new_chain = self.chain;
-            f(&new_chain);
-            return .{
-                .tx = self.tx,
-                .block = self.block,
-                .cfg = self.cfg,
-                .journaled_state = self.journaled_state,
-                .local = self.local,
-                .chain = new_chain,
-                .ctx_error = ContextError.ok,
-            };
-        }
+    /// Modifies the context journal.
+    pub fn modifyJournalChained(self: Context, f: fn (*Journal) void) Context {
+        f(&self.journaled_state);
+        return .{
+            .tx = self.tx,
+            .block = self.block,
+            .cfg = self.cfg,
+            .journaled_state = self.journaled_state,
+            .local = self.local,
+            .chain = self.chain,
+            .ctx_error = ContextError.ok,
+        };
+    }
 
-        /// Modifies the context database.
-        pub fn modifyDbChained(self: @This(), f: fn (*DB) void) @This() {
-            f(&self.journaled_state.database);
-            return .{
-                .tx = self.tx,
-                .block = self.block,
-                .cfg = self.cfg,
-                .journaled_state = self.journaled_state,
-                .local = self.local,
-                .chain = self.chain,
-                .ctx_error = ContextError.ok,
-            };
-        }
+    /// Modifies the context block.
+    pub fn modifyBlock(self: *Context, f: fn (*BlockEnv) void) void {
+        f(&self.block);
+    }
 
-        /// Modifies the context journal.
-        pub fn modifyJournalChained(self: @This(), f: fn (*Journal(DB)) void) @This() {
-            f(&self.journaled_state);
-            return .{
-                .tx = self.tx,
-                .block = self.block,
-                .cfg = self.cfg,
-                .journaled_state = self.journaled_state,
-                .local = self.local,
-                .chain = self.chain,
-                .ctx_error = ContextError.ok,
-            };
-        }
+    /// Modifies the context transaction.
+    pub fn modifyTx(self: *Context, f: fn (*TxEnv) void) void {
+        f(&self.tx);
+    }
 
-        /// Modifies the context block.
-        pub fn modifyBlock(self: *@This(), f: fn (*BlockEnv) void) void {
-            f(&self.block);
-        }
+    /// Modifies the context configuration.
+    pub fn modifyCfg(self: *Context, f: fn (*CfgEnv) void) void {
+        f(&self.cfg);
+        self.journaled_state.setSpecId(self.cfg.spec());
+    }
 
-        /// Modifies the context transaction.
-        pub fn modifyTx(self: *@This(), f: fn (*TxEnv) void) void {
-            f(&self.tx);
-        }
+    /// Modifies the context chain.
+    pub fn modifyChain(self: *Context, f: fn (*void) void) void {
+        f(&self.chain);
+    }
 
-        /// Modifies the context configuration.
-        pub fn modifyCfg(self: *@This(), f: fn (*CfgEnv) void) void {
-            f(&self.cfg);
-            self.journaled_state.setSpecId(self.cfg.spec());
-        }
+    /// Modifies the context database.
+    pub fn modifyDb(self: *Context, f: fn (*database_mod.Database) void) void {
+        f(&self.journaled_state.database);
+    }
 
-        /// Modifies the context chain.
-        pub fn modifyChain(self: *@This(), f: fn (*@TypeOf(self.chain)) void) void {
-            f(&self.chain);
-        }
+    /// Modifies the context journal.
+    pub fn modifyJournal(self: *Context, f: fn (*Journal) void) void {
+        f(&self.journaled_state);
+    }
 
-        /// Modifies the context database.
-        pub fn modifyDb(self: *@This(), f: fn (*DB) void) void {
-            f(&self.journaled_state.database);
-        }
+    /// Modifies the local context.
+    pub fn modifyLocal(self: *Context, f: fn (*LocalContext) void) void {
+        f(&self.local);
+    }
 
-        /// Modifies the context journal.
-        pub fn modifyJournal(self: *@This(), f: fn (*Journal(DB)) void) void {
-            f(&self.journaled_state);
-        }
+    /// Set transaction
+    pub fn setTx(self: *Context, tx: TxEnv) void {
+        self.tx = tx;
+    }
 
-        /// Modifies the local context.
-        pub fn modifyLocal(self: *@This(), f: fn (*LocalContext) void) void {
-            f(&self.local);
-        }
+    /// Set block
+    pub fn setBlock(self: *Context, block: BlockEnv) void {
+        self.block = block;
+    }
 
-        /// Set transaction
-        pub fn setTx(self: *@This(), tx: TxEnv) void {
-            self.tx = tx;
-        }
+    /// Get all context components
+    pub fn all(self: Context) struct { BlockEnv, TxEnv, CfgEnv, *const database_mod.Database, Journal, void, LocalContext } {
+        return .{
+            self.block,
+            self.tx,
+            self.cfg,
+            &self.journaled_state.database,
+            self.journaled_state,
+            self.chain,
+            self.local,
+        };
+    }
 
-        /// Set block
-        pub fn setBlock(self: *@This(), block: BlockEnv) void {
-            self.block = block;
-        }
+    /// Get all context components mutably
+    pub fn getAllMut(self: *Context) struct { BlockEnv, TxEnv, CfgEnv, *Journal, *void, *LocalContext } {
+        return .{
+            self.block,
+            self.tx,
+            self.cfg,
+            &self.journaled_state,
+            &self.chain,
+            &self.local,
+        };
+    }
 
-        /// Get all context components
-        pub fn all(self: @This()) struct { BlockEnv, TxEnv, CfgEnv, *const DB, Journal(DB), void, LocalContext } {
-            return .{
-                self.block,
-                self.tx,
-                self.cfg,
-                &self.journaled_state.database,
-                self.journaled_state,
-                self.chain,
-                self.local,
-            };
-        }
+    /// Get error
+    pub fn getError(self: *Context) *ContextError {
+        return &self.ctx_error;
+    }
 
-        /// Get all context components mutably
-        pub fn getAllMut(self: *@This()) struct { BlockEnv, TxEnv, CfgEnv, *Journal(DB), *void, *LocalContext } {
-            return .{
-                self.block,
-                self.tx,
-                self.cfg,
-                &self.journaled_state,
-                &self.chain,
-                &self.local,
-            };
-        }
+    /// Get block
+    pub fn getBlock(self: Context) BlockEnv {
+        return self.block;
+    }
 
-        /// Get error
-        pub fn getError(self: *@This()) *ContextError {
-            return &self.ctx_error;
-        }
+    /// Get transaction
+    pub fn getTx(self: Context) TxEnv {
+        return self.tx;
+    }
 
-        /// Get block
-        pub fn getBlock(self: @This()) BlockEnv {
-            return self.block;
-        }
+    /// Get configuration
+    pub fn getCfg(self: Context) CfgEnv {
+        return self.cfg;
+    }
 
-        /// Get transaction
-        pub fn getTx(self: @This()) TxEnv {
-            return self.tx;
-        }
+    /// Get database
+    pub fn db(self: Context) *const database_mod.Database {
+        return &self.journaled_state.database;
+    }
 
-        /// Get configuration
-        pub fn getCfg(self: @This()) CfgEnv {
-            return self.cfg;
-        }
+    /// Get database mutably
+    pub fn getDb(self: *Context) *database_mod.Database {
+        return &self.journaled_state.database;
+    }
 
-        /// Get database
-        pub fn db(self: @This()) *const DB {
-            return &self.journaled_state.database;
-        }
+    /// Get journal
+    pub fn getJournal(self: Context) Journal {
+        return self.journaled_state;
+    }
 
-        /// Get database mutably
-        pub fn getDb(self: *@This()) *DB {
-            return &self.journaled_state.database;
-        }
+    /// Get journal mutably
+    pub fn getJournalMut(self: *Context) *Journal {
+        return &self.journaled_state;
+    }
 
-        /// Get journal
-        pub fn getJournal(self: @This()) Journal(DB) {
-            return self.journaled_state;
-        }
+    /// Get chain
+    pub fn getChain(self: Context) void {
+        return self.chain;
+    }
 
-        /// Get journal mutably
-        pub fn getJournalMut(self: *@This()) *Journal(DB) {
-            return &self.journaled_state;
-        }
+    /// Get chain mutably
+    pub fn getChainMut(self: *Context) *void {
+        return &self.chain;
+    }
 
-        /// Get chain
-        pub fn getChain(self: @This()) @TypeOf(self.chain) {
-            return self.chain;
-        }
+    /// Get local context
+    pub fn getLocal(self: Context) LocalContext {
+        return self.local;
+    }
 
-        /// Get chain mutably
-        pub fn getChainMut(self: *@This()) *@TypeOf(self.chain) {
-            return &self.chain;
-        }
+    /// Get local context mutably
+    pub fn getLocalMut(self: *Context) *LocalContext {
+        return &self.local;
+    }
 
-        /// Get local context
-        pub fn getLocal(self: @This()) LocalContext {
-            return self.local;
-        }
+    // Block methods
 
-        /// Get local context mutably
-        pub fn getLocalMut(self: *@This()) *LocalContext {
-            return &self.local;
-        }
+    pub fn basefee(self: Context) primitives.U256 {
+        return @as(primitives.U256, self.block.basefee());
+    }
 
-        // Block methods
+    pub fn blobGasprice(self: Context) primitives.U256 {
+        return @as(primitives.U256, self.block.blobExcessGasAndPrice().?.blobGasprice());
+    }
 
-        pub fn basefee(self: @This()) primitives.U256 {
-            return @as(primitives.U256, self.block.basefee());
-        }
+    pub fn gasLimit(self: Context) primitives.U256 {
+        return @as(primitives.U256, self.block.gasLimit());
+    }
 
-        pub fn blobGasprice(self: @This()) primitives.U256 {
-            return @as(primitives.U256, self.block.blobExcessGasAndPrice().?.blobGasprice());
-        }
+    pub fn difficulty(self: Context) primitives.U256 {
+        return self.block.difficulty();
+    }
 
-        pub fn gasLimit(self: @This()) primitives.U256 {
-            return @as(primitives.U256, self.block.gasLimit());
-        }
+    pub fn prevrandao(self: Context) ?primitives.U256 {
+        return if (self.block.prevrandao()) |prev_randao| primitives.U256.fromBytes(prev_randao) else null;
+    }
 
-        pub fn difficulty(self: @This()) primitives.U256 {
-            return self.block.difficulty();
-        }
+    pub fn blockNumber(self: Context) primitives.U256 {
+        return self.block.number();
+    }
 
-        pub fn prevrandao(self: @This()) ?primitives.U256 {
-            return if (self.block.prevrandao()) |prev_randao| primitives.U256.fromBytes(prev_randao) else null;
-        }
+    pub fn timestamp(self: Context) primitives.U256 {
+        return self.block.timestamp();
+    }
 
-        pub fn blockNumber(self: @This()) primitives.U256 {
-            return self.block.number();
-        }
+    pub fn beneficiary(self: Context) primitives.Address {
+        return self.block.beneficiary();
+    }
 
-        pub fn timestamp(self: @This()) primitives.U256 {
-            return self.block.timestamp();
-        }
+    pub fn chainId(self: Context) primitives.U256 {
+        return @as(primitives.U256, self.cfg.chainId());
+    }
 
-        pub fn beneficiary(self: @This()) primitives.Address {
-            return self.block.beneficiary();
-        }
+    // Transaction methods
 
-        pub fn chainId(self: @This()) primitives.U256 {
-            return @as(primitives.U256, self.cfg.chainId());
-        }
+    pub fn effectiveGasPrice(self: Context) primitives.U256 {
+        const base_fee = self.block.basefee();
+        return primitives.U256.fromU128(self.tx.effectiveGasPrice(base_fee));
+    }
 
-        // Transaction methods
+    pub fn caller(self: Context) primitives.Address {
+        return self.tx.caller();
+    }
 
-        pub fn effectiveGasPrice(self: @This()) primitives.U256 {
-            const base_fee = self.block.basefee();
-            return primitives.U256.fromU128(self.tx.effectiveGasPrice(base_fee));
-        }
-
-        pub fn caller(self: @This()) primitives.Address {
-            return self.tx.caller();
-        }
-
-        pub fn blobHash(self: @This(), number: usize) ?primitives.U256 {
-            const tx = self.tx;
-            if (tx.txType() != @intFromEnum(TxEnv.TransactionType.Eip4844)) {
-                return null;
-            }
-            const blob_hashes = tx.blobVersionedHashes();
-            if (number < blob_hashes.len) {
-                return primitives.U256.fromBytes(blob_hashes[number]);
-            }
+    pub fn blobHash(self: Context, number: usize) ?primitives.U256 {
+        const tx = self.tx;
+        if (tx.txType() != @intFromEnum(TxEnv.TransactionType.Eip4844)) {
             return null;
         }
-
-        // Config methods
-
-        pub fn maxInitcodeSize(self: @This()) usize {
-            return self.cfg.maxInitcodeSize();
+        const blob_hashes = tx.blobVersionedHashes();
+        if (number < blob_hashes.len) {
+            return primitives.U256.fromBytes(blob_hashes[number]);
         }
+        return null;
+    }
 
-        // Database methods
+    // Config methods
 
-        pub fn blockHash(self: *@This(), requested_number: u64) ?primitives.Hash {
-            // BLOCKHASH is only valid for the last BLOCK_HASH_HISTORY (256) blocks.
-            // Requests for the current block or future blocks, or blocks older than 256
-            // blocks ago, must return zero per the Yellow Paper.
-            const current: u64 = @intCast(self.block.number);
-            if (requested_number >= current) return [_]u8{0} ** 32;
-            if (current - requested_number > primitives.BLOCK_HASH_HISTORY) return [_]u8{0} ** 32;
-            return self.journaled_state.database.blockHash(requested_number) catch {
-                self.ctx_error = ContextError.database_error;
-                return null;
-            };
-        }
+    pub fn maxInitcodeSize(self: Context) usize {
+        return self.cfg.maxInitcodeSize();
+    }
 
-        // Journal methods
+    // Database methods
 
-        /// Gets the transient storage value of `address` at `index`.
-        pub fn tload(self: *@This(), address: primitives.Address, index: primitives.StorageKey) primitives.StorageValue {
-            return self.journaled_state.tload(address, index);
-        }
+    pub fn blockHash(self: *Context, requested_number: u64) ?primitives.Hash {
+        // BLOCKHASH is only valid for the last BLOCK_HASH_HISTORY (256) blocks.
+        // Requests for the current block or future blocks, or blocks older than 256
+        // blocks ago, must return zero per the Yellow Paper.
+        const current: u64 = @intCast(self.block.number);
+        if (requested_number >= current) return [_]u8{0} ** 32;
+        if (current - requested_number > primitives.BLOCK_HASH_HISTORY) return [_]u8{0} ** 32;
+        return self.journaled_state.database.blockHash(requested_number) catch {
+            self.ctx_error = ContextError.database_error;
+            return null;
+        };
+    }
 
-        /// Sets the transient storage value of `address` at `index`.
-        pub fn tstore(self: *@This(), address: primitives.Address, index: primitives.StorageKey, value: primitives.StorageValue) void {
-            self.journaled_state.tstore(address, index, value);
-        }
+    // Journal methods
 
-        /// Emits a log owned by `address` with given `LogData`.
-        pub fn log(self: *@This(), log_entry: primitives.Log) void {
-            self.journaled_state.log(log_entry);
-        }
+    /// Gets the transient storage value of `address` at `index`.
+    pub fn tload(self: *Context, address: primitives.Address, index: primitives.StorageKey) primitives.StorageValue {
+        return self.journaled_state.tload(address, index);
+    }
 
-        /// Marks `address` to be deleted, with funds transferred to `target`.
-        pub fn selfdestruct(self: *@This(), address: primitives.Address, target: primitives.Address) ?Journal(DB).StateLoad(Journal(DB).SelfDestructResult) {
-            return self.journaled_state.selfdestruct(address, target) catch {
-                self.ctx_error = ContextError.database_error;
-                return null;
-            };
-        }
+    /// Sets the transient storage value of `address` at `index`.
+    pub fn tstore(self: *Context, address: primitives.Address, index: primitives.StorageKey, value: primitives.StorageValue) void {
+        self.journaled_state.tstore(address, index, value);
+    }
 
-        pub fn sstoreSkipColdLoad(self: *@This(), address: primitives.Address, key: primitives.StorageKey, value: primitives.StorageValue, skip_cold_load: bool) Journal(DB).StateLoad(Journal(DB).SStoreResult) {
-            return self.journaled_state.sstoreSkipColdLoad(address, key, value, skip_cold_load) catch {
-                self.ctx_error = ContextError.database_error;
-                return Journal(DB).StateLoad.new(Journal(DB).SStoreResult{
-                    .original_value = @as(primitives.StorageValue, 0),
-                    .present_value = @as(primitives.StorageValue, 0),
-                    .new_value = value,
-                }, false);
-            };
-        }
+    /// Emits a log owned by `address` with given `LogData`.
+    pub fn log(self: *Context, log_entry: primitives.Log) void {
+        self.journaled_state.log(log_entry);
+    }
 
-        pub fn sloadSkipColdLoad(self: *@This(), address: primitives.Address, key: primitives.StorageKey, skip_cold_load: bool) Journal(DB).StateLoad(primitives.StorageValue) {
-            return self.journaled_state.sloadSkipColdLoad(address, key, skip_cold_load) catch {
-                self.ctx_error = ContextError.database_error;
-                return Journal(DB).StateLoad.new(@as(primitives.StorageValue, 0), false);
-            };
-        }
+    /// Marks `address` to be deleted, with funds transferred to `target`.
+    pub fn selfdestruct(self: *Context, address: primitives.Address, target: primitives.Address) ?StateLoad(SelfDestructResult) {
+        return self.journaled_state.selfdestruct(address, target) catch {
+            self.ctx_error = ContextError.database_error;
+            return null;
+        };
+    }
 
-        pub fn loadAccountInfoSkipColdLoad(self: *@This(), address: primitives.Address, load_code: bool, skip_cold_load: bool) Journal(DB).AccountInfoLoad {
-            return self.journaled_state.loadAccountInfoSkipColdLoad(address, load_code, skip_cold_load) catch {
-                self.ctx_error = ContextError.database_error;
-                return Journal(DB).AccountInfoLoad.new(&state.AccountInfo.default(), false, true);
-            };
-        }
-    };
-}
+    pub fn sstoreSkipColdLoad(self: *Context, address: primitives.Address, key: primitives.StorageKey, value: primitives.StorageValue, skip_cold_load: bool) StateLoad(SStoreResult) {
+        return self.journaled_state.sstoreSkipColdLoad(address, key, value, skip_cold_load) catch {
+            self.ctx_error = ContextError.database_error;
+            return StateLoad(SStoreResult).new(SStoreResult{
+                .original_value = @as(primitives.StorageValue, 0),
+                .present_value = @as(primitives.StorageValue, 0),
+                .new_value = value,
+            }, false);
+        };
+    }
 
-/// Default context backed by `InMemoryDB`. Used throughout zevm internals.
-/// External consumers that need tracking (e.g. zevm-stateless) use `Context(TheirDB)`.
-pub const DefaultContext = Context(database.InMemoryDB);
+    pub fn sloadSkipColdLoad(self: *Context, address: primitives.Address, key: primitives.StorageKey, skip_cold_load: bool) StateLoad(primitives.StorageValue) {
+        return self.journaled_state.sloadSkipColdLoad(address, key, skip_cold_load) catch {
+            self.ctx_error = ContextError.database_error;
+            return StateLoad(primitives.StorageValue).new(@as(primitives.StorageValue, 0), false);
+        };
+    }
+
+    pub fn loadAccountInfoSkipColdLoad(self: *Context, address: primitives.Address, load_code: bool, skip_cold_load: bool) AccountInfoLoad {
+        return self.journaled_state.loadAccountInfoSkipColdLoad(address, load_code, skip_cold_load) catch {
+            self.ctx_error = ContextError.database_error;
+            return AccountInfoLoad.new(&state.AccountInfo.default(), false, true);
+        };
+    }
+};
+
+/// Default context — alias for `Context`. Use `Context.new(Database.forDb(T, &db), spec)`.
+pub const DefaultContext = Context;
