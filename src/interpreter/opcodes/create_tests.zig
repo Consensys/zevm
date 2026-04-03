@@ -121,8 +121,8 @@ test "create2Address: different salts produce different addresses" {
 // Helpers for opcode handler tests
 // ---------------------------------------------------------------------------
 
-fn makeCtx(db: database_mod.InMemoryDB) context_mod.Context {
-    return context_mod.Context.new(db, .prague);
+fn makeCtx(db: database_mod.InMemoryDB) context_mod.DefaultContext {
+    return context_mod.DefaultContext.new(db, .prague);
 }
 
 fn makeInterp(target: primitives.Address, gas_limit: u64) Interpreter {
@@ -160,7 +160,7 @@ test "opCreate: stack underflow with fewer than 3 items" {
     interp.stack.pushUnsafe(0);
     interp.stack.pushUnsafe(0); // only 2 items
 
-    var host = Host{ .ctx = &ctx };
+    var host = Host.fromCtx(&ctx, null);
     var ic = InstructionContext{ .interpreter = &interp, .host = &host };
     call_ops.opCreate(&ic);
 
@@ -181,7 +181,7 @@ test "opCreate: static context halts with invalid_static" {
     interp.stack.pushUnsafe(0); // offset
     interp.stack.pushUnsafe(0); // size
 
-    var host = Host{ .ctx = &ctx };
+    var host = Host.fromCtx(&ctx, null);
     var ic = InstructionContext{ .interpreter = &interp, .host = &host };
     call_ops.opCreate(&ic);
 
@@ -202,7 +202,7 @@ test "opCreate2: stack underflow with fewer than 4 items" {
     interp.stack.pushUnsafe(0);
     interp.stack.pushUnsafe(0);
 
-    var host = Host{ .ctx = &ctx };
+    var host = Host.fromCtx(&ctx, null);
     var ic = InstructionContext{ .interpreter = &interp, .host = &host };
     call_ops.opCreate2(&ic);
 
@@ -232,7 +232,7 @@ test "opCreate: STOP init code deploys empty contract, returns non-zero address"
     interp.stack.pushUnsafe(0); // offset
     interp.stack.pushUnsafe(INIT_CODE.len); // size
 
-    var host = Host{ .ctx = &ctx };
+    var host = Host.fromCtx(&ctx, null);
     var ic = InstructionContext{ .interpreter = &interp, .host = &host };
     call_ops.opCreate(&ic);
     runPendingCreate(&host, &interp, .prague);
@@ -264,7 +264,7 @@ test "opCreate2: same inputs produce same address on stack" {
             interp.stack.pushUnsafe(0); // offset
             interp.stack.pushUnsafe(INIT_CODE.len); // size
 
-            var host = Host{ .ctx = &ctx };
+            var host = Host.fromCtx(&ctx, null);
             var ic = InstructionContext{ .interpreter = &interp, .host = &host };
             call_ops.opCreate2(&ic);
             runPendingCreate(&host, &interp, .prague);
@@ -298,7 +298,7 @@ test "opCreate: collision at derived address returns 0" {
         interp.stack.pushUnsafe(0);
         interp.stack.pushUnsafe(0);
         interp.stack.pushUnsafe(INIT_CODE.len);
-        var host = Host{ .ctx = &ctx };
+        var host = Host.fromCtx(&ctx, null);
         var ic = InstructionContext{ .interpreter = &interp, .host = &host };
         call_ops.opCreate(&ic);
         runPendingCreate(&host, &interp, .prague);
@@ -322,7 +322,7 @@ test "opCreate: collision at derived address returns 0" {
         interp.stack.pushUnsafe(0);
         interp.stack.pushUnsafe(0);
         interp.stack.pushUnsafe(INIT_CODE.len);
-        var host = Host{ .ctx = &ctx };
+        var host = Host.fromCtx(&ctx, null);
         var ic = InstructionContext{ .interpreter = &interp, .host = &host };
         call_ops.opCreate(&ic);
         const second_result = interp.stack.popUnsafe();

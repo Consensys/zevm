@@ -215,7 +215,7 @@ pub fn runTestCase(tc: types.TestCase, allocator: std.mem.Allocator) TestOutcome
     }
 
     // Build context (db is moved into Context by value)
-    var ctx = context.Context.new(db, spec);
+    var ctx = context.DefaultContext.new(db, spec);
     // InMemoryDB uses the GPA allocator; free its hash maps on all exit paths.
     defer ctx.journaled_state.database.deinit();
 

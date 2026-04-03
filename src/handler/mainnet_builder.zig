@@ -26,7 +26,7 @@ pub const MainnetEvm = struct {
     evm: main.Evm,
 
     /// Get the execution context.
-    pub fn getContext(self: *MainnetEvm) *context.Context {
+    pub fn getContext(self: *MainnetEvm) *context.DefaultContext {
         return self.evm.ctx;
     }
 
@@ -53,7 +53,7 @@ pub const MainnetEvm = struct {
 };
 
 /// Mainnet context type alias
-pub const MainnetContext = context.Context;
+pub const MainnetContext = context.DefaultContext;
 
 /// Main builder
 pub const MainBuilder = struct {
@@ -87,16 +87,16 @@ pub const MainContext = struct {
     /// Create new mainnet context
     pub fn mainnet() MainnetContext {
         const db = database.InMemoryDB.init(alloc_mod.get());
-        return context.Context.new(db, primitives.SpecId.prague);
+        return context.DefaultContext.new(db, primitives.SpecId.prague);
     }
 };
 
 /// Mainnet handler — stateless, all methods are free functions grouped in a namespace.
-/// All functions accept `*main.Evm` so they work with both the heap-allocated `*MainnetEvm`
-/// (call `evm.execute()` or pass `&mevm.evm`) and stack-allocated test helpers.
+/// All functions accept `anytype` for `evm` so they work with EvmFor(any DB type),
+/// the heap-allocated `*MainnetEvm`, and stack-allocated test helpers.
 pub const MainnetHandler = struct {
     /// Validate transaction — environment checks (no DB access) then caller state check.
-    pub fn validate(evm: *main.Evm, initial_gas: *validation.InitialAndFloorGas) !void {
+    pub fn validate(evm: anytype, initial_gas: *validation.InitialAndFloorGas) !void {
         const ctx = evm.getContext();
 
         // 1. Validate block/tx/cfg fields (chain ID, gas cap, priority fee ordering)
@@ -120,7 +120,7 @@ pub const MainnetHandler = struct {
     /// Must run after validate() so the caller is already loaded and nonce bumped.
     /// Populates `initial_gas.auth_refund` with 12,500 (PER_EMPTY_ACCOUNT_COST/2) per valid
     /// EIP-7702 authorization where the authority account is non-empty (existing); 0 for new accounts.
-    pub fn preExecution(evm: *main.Evm, initial_gas: *validation.InitialAndFloorGas) !void {
+    pub fn preExecution(evm: anytype, initial_gas: *validation.InitialAndFloorGas) !void {
         const ctx = evm.getContext();
         const tx = &ctx.tx;
         const spec = ctx.cfg.spec;
@@ -146,18 +146,32 @@ pub const MainnetHandler = struct {
         }
 
         // EIP-2929: Pre-warm all access-list addresses and their storage slots.
-        // Calling loadAccountWithCode marks the account warm (cold-load journal entry added).
-        // Calling sload marks each storage slot warm.
+        // Use warmAccessList to mark addresses/slots warm in the access list WITHOUT eagerly
+        // loading them from the database.  Gas accounting uses isCold()/isStorageCold() which
+        // check warm_addresses.access_list — independent of whether the account was DB-loaded.
+        // This ensures pre-warmed-but-never-touched accounts are not tracked as accessed state,
+        // which is required for correct EIP-7928 Block Access List construction.
         if (tx.access_list.items) |items| {
+            const allocator = alloc_mod.get();
+            var map = std.AutoHashMap(
+                primitives.Address,
+                std.ArrayList(primitives.StorageKey),
+            ).init(allocator);
+            defer {
+                var it = map.valueIterator();
+                while (it.next()) |v| v.deinit(allocator);
+                map.deinit();
+            }
             for (items.items) |item| {
-                // Load account (marks it warm, journal entry recorded)
-                _ = try js.loadAccountWithCode(item.address);
-
-                // Load each storage slot (marks it warm, journal entry recorded)
+                const gop = try map.getOrPut(item.address);
+                if (!gop.found_existing) {
+                    gop.value_ptr.* = std.ArrayList(primitives.StorageKey){};
+                }
                 for (item.storage_keys.items) |key| {
-                    _ = try js.sload(item.address, key);
+                    try gop.value_ptr.*.append(allocator, key);
                 }
             }
+            try js.warmAccessList(map);
         }
 
         // EIP-7702: Apply authorization list (Prague+)
@@ -247,7 +261,7 @@ pub const MainnetHandler = struct {
     }
 
     /// Execute the transaction frame — runs the interpreter against bytecode.
-    pub fn executeFrame(evm: *main.Evm, initial: validation.InitialAndFloorGas) !main.FrameResult {
+    pub fn executeFrame(evm: anytype, initial: validation.InitialAndFloorGas) !main.FrameResult {
         const ctx = evm.getContext();
         const tx = &ctx.tx;
         const spec = ctx.cfg.spec;
@@ -270,10 +284,8 @@ pub const MainnetHandler = struct {
         else
             0;
 
-        var host = interpreter_mod.Host{
-            .ctx = ctx,
-            .precompiles = &evm.precompiles.precompiles,
-        };
+        const DB = @TypeOf(ctx.*).DatabaseType;
+        var host = interpreter_mod.Host.init(DB, ctx, &evm.precompiles.precompiles);
 
         var return_data_buf: std.ArrayList(u8) = .{};
         defer return_data_buf.deinit(alloc_mod.get());
@@ -444,7 +456,7 @@ pub const MainnetHandler = struct {
     /// Post-execution phase — gas refund capping (EIP-3529), EIP-7623 floor, reimburse caller,
     /// reward beneficiary, and commit journal.
     pub fn postExecution(
-        evm: *main.Evm,
+        evm: anytype,
         result: *main.FrameResult,
         initial_gas: validation.InitialAndFloorGas,
     ) !void {
@@ -551,7 +563,8 @@ pub const MainnetHandler = struct {
             result.result.logs = js.takeLogs();
         }
 
-        // 7. Commit transaction state
+        // 7. Commit transaction state.
+        // commitTx() records committed-changed storage and flushes per-tx BAL tracking internally.
         js.commitTx();
 
         // 8. Update ExecutionResult with final accounting.
@@ -586,9 +599,9 @@ pub const MainnetHandler = struct {
     }
 
     /// Handle errors — revert journal, discard tx.
-    pub fn catchError(evm: *main.Evm, _: anyerror) void {
+    pub fn catchError(evm: anytype, _: anyerror) void {
         const ctx = evm.getContext();
-        // Revert all state changes from this transaction
+        // Revert all state changes from this transaction (also clears per-tx BAL pending).
         ctx.journaled_state.discardTx();
     }
 };
@@ -774,7 +787,7 @@ fn executeIterative(
 /// Accepts `*main.Evm` so it works with both heap-allocated `*MainnetEvm` (pass `&mevm.evm`)
 /// and stack-allocated test patterns (pass `&evm` directly).
 pub const ExecuteEvm = struct {
-    pub fn execute(evm: *main.Evm) !main.ExecutionResult {
+    pub fn execute(evm: anytype) !main.ExecutionResult {
         var initial_gas = validation.InitialAndFloorGas{ .initial_gas = 0, .floor_gas = 0 };
 
         // Validate (env checks + caller deduction)
@@ -808,7 +821,7 @@ pub const ExecuteEvm = struct {
 /// Execute commit EVM — execute then commit state to the underlying database.
 /// Note: commitTx() is called inside postExecution; no second commit needed here.
 pub const ExecuteCommitEvm = struct {
-    pub fn executeAndCommit(evm: *main.Evm) !main.ExecutionResult {
+    pub fn executeAndCommit(evm: anytype) !main.ExecutionResult {
         return ExecuteEvm.execute(evm);
     }
 };

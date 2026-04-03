@@ -3,8 +3,6 @@ const primitives = @import("primitives");
 const state = @import("state");
 const bytecode = @import("bytecode");
 const database = @import("database");
-const ContextError = @import("context.zig").ContextError;
-
 pub const BlockEnv = @import("block.zig").BlockEnv;
 pub const BlobExcessGasAndPrice = @import("block.zig").BlobExcessGasAndPrice;
 pub const TxEnv = @import("tx.zig").TxEnv;
@@ -18,8 +16,17 @@ pub const Either = @import("tx.zig").Either;
 pub const CfgEnv = @import("cfg.zig").CfgEnv;
 pub const Journal = @import("journal.zig").Journal;
 pub const JournalCheckpoint = @import("journal.zig").JournalCheckpoint;
+pub const StateLoad = @import("journal.zig").StateLoad;
+pub const AccountInfoLoad = @import("journal.zig").AccountInfoLoad;
+pub const SStoreResult = @import("journal.zig").SStoreResult;
+pub const SelfDestructResult = @import("journal.zig").SelfDestructResult;
+pub const TransferError = @import("journal.zig").TransferError;
+pub const AccountPreState = @import("journal.zig").AccountPreState;
+pub const AccessLog = @import("journal.zig").AccessLog;
+pub const ContextError = @import("context.zig").ContextError;
 pub const LocalContext = @import("local.zig").LocalContext;
 pub const Context = @import("context.zig").Context;
+pub const DefaultContext = @import("context.zig").DefaultContext;
 pub const Evm = @import("evm.zig").Evm;
 
 // Re-export all context types
@@ -106,7 +113,7 @@ pub const testing = struct {
         var db = database.InMemoryDB.init(allocator);
         defer db.deinit();
 
-        const ctx = Context.new(db, primitives.SpecId.prague);
+        const ctx = DefaultContext.new(db, primitives.SpecId.prague);
         std.debug.assert(ctx.block.number == @as(primitives.U256, 0));
         std.debug.assert(ctx.tx.tx_type == 0);
         std.debug.assert(ctx.cfg.spec == primitives.SpecId.prague);
@@ -126,7 +133,7 @@ pub const testing = struct {
         var db = database.InMemoryDB.init(allocator);
         defer db.deinit();
 
-        const ctx = Context.new(db, primitives.SpecId.prague);
+        const ctx = DefaultContext.new(db, primitives.SpecId.prague);
         const evm = Evm.new(ctx, {}, {});
 
         std.debug.assert(evm.ctx.block.number == @as(primitives.U256, 0));
