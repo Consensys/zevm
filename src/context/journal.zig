@@ -52,6 +52,35 @@ pub const JournalEntryFactory = struct {
     }
 };
 
+/// Pre-block account state snapshot for EIP-7928 BAL tracking.
+pub const AccountPreState = struct {
+    nonce: u64 = 0,
+    balance: primitives.U256 = @as(primitives.U256, 0),
+    code_hash: primitives.Hash = primitives.KECCAK_EMPTY,
+};
+
+/// Block Access List log produced after all txs complete.
+/// Ownership of the maps is transferred by `JournalInner.takeAccessLog()`.
+pub const AccessLog = struct {
+    /// Pre-block account states (nonce, balance, code_hash) for all accessed addresses.
+    accounts: std.AutoHashMap(primitives.Address, AccountPreState),
+    /// Pre-block storage values for all accessed slots.
+    storage: std.AutoHashMap(primitives.Address, std.AutoHashMap(primitives.StorageKey, primitives.StorageValue)),
+    /// Slots that were committed to a value different from the pre-block value at any tx boundary.
+    /// Used to distinguish storageChanges from storageReads for cross-tx net-zero writes.
+    committed_changed: std.AutoHashMap(primitives.Address, std.AutoHashMap(primitives.StorageKey, void)),
+
+    pub fn deinit(self: *@This()) void {
+        self.accounts.deinit();
+        var sit = self.storage.valueIterator();
+        while (sit.next()) |m| m.deinit();
+        self.storage.deinit();
+        var cit = self.committed_changed.valueIterator();
+        while (cit.next()) |m| m.deinit();
+        self.committed_changed.deinit();
+    }
+};
+
 /// Selfdestruction revert status
 pub const SelfdestructionRevertStatus = enum {
     GloballySelfdestroyed,
@@ -403,6 +432,19 @@ pub const JournalInner = struct {
     /// Emitted as Burn logs at postExecution, sorted by address. Checkpointed via burn_i.
     pending_burns: std.ArrayList(PendingBurn),
 
+    // ── EIP-7928 BAL tracking ──────────────────────────────────────────────────
+    // Permanently committed account pre-states (survive across txs in a block).
+    bal_pre_accounts: std.AutoHashMap(primitives.Address, AccountPreState),
+    // Permanently committed storage pre-states.
+    bal_pre_storage: std.AutoHashMap(primitives.Address, std.AutoHashMap(primitives.StorageKey, primitives.StorageValue)),
+    // Per-tx staging: flushed on commitTx, cleared on discardTx.
+    bal_pending_accounts: std.AutoHashMap(primitives.Address, AccountPreState),
+    bal_pending_storage: std.AutoHashMap(primitives.Address, std.AutoHashMap(primitives.StorageKey, primitives.StorageValue)),
+    // Slots committed to a non-pre-block value at any tx boundary.
+    bal_committed_changed: std.AutoHashMap(primitives.Address, std.AutoHashMap(primitives.StorageKey, void)),
+    // Addresses loaded only for gas calculation that went OOG (excluded from BAL).
+    bal_untracked: std.AutoHashMap(primitives.Address, void),
+
     pub fn new() JournalInner {
         return .{
             .evm_state = state.EvmState.init(alloc_mod.get()),
@@ -413,6 +455,12 @@ pub const JournalInner = struct {
             .spec = primitives.SpecId.prague,
             .warm_addresses = WarmAddresses.new(),
             .pending_burns = std.ArrayList(PendingBurn){},
+            .bal_pre_accounts = std.AutoHashMap(primitives.Address, AccountPreState).init(alloc_mod.get()),
+            .bal_pre_storage = std.AutoHashMap(primitives.Address, std.AutoHashMap(primitives.StorageKey, primitives.StorageValue)).init(alloc_mod.get()),
+            .bal_pending_accounts = std.AutoHashMap(primitives.Address, AccountPreState).init(alloc_mod.get()),
+            .bal_pending_storage = std.AutoHashMap(primitives.Address, std.AutoHashMap(primitives.StorageKey, primitives.StorageValue)).init(alloc_mod.get()),
+            .bal_committed_changed = std.AutoHashMap(primitives.Address, std.AutoHashMap(primitives.StorageKey, void)).init(alloc_mod.get()),
+            .bal_untracked = std.AutoHashMap(primitives.Address, void).init(alloc_mod.get()),
         };
     }
 
@@ -424,6 +472,107 @@ pub const JournalInner = struct {
         self.journal.deinit(alloc_mod.get());
         self.warm_addresses.deinit();
         self.pending_burns.deinit(alloc_mod.get());
+        self.bal_pre_accounts.deinit();
+        var pre_sit = self.bal_pre_storage.valueIterator();
+        while (pre_sit.next()) |m| m.deinit();
+        self.bal_pre_storage.deinit();
+        self.bal_pending_accounts.deinit();
+        var pend_sit = self.bal_pending_storage.valueIterator();
+        while (pend_sit.next()) |m| m.deinit();
+        self.bal_pending_storage.deinit();
+        var cc_it = self.bal_committed_changed.valueIterator();
+        while (cc_it.next()) |m| m.deinit();
+        self.bal_committed_changed.deinit();
+        self.bal_untracked.deinit();
+    }
+
+    // ── EIP-7928 BAL tracking helpers ─────────────────────────────────────────
+
+    /// Record an account at its pre-block state (null = non-existent account).
+    /// Uses first-access-wins: if the address is already in pre or pending, skip.
+    fn recordAccountAccess(self: *JournalInner, address: primitives.Address, info: ?state.AccountInfo) void {
+        if (self.bal_pre_accounts.contains(address) or self.bal_pending_accounts.contains(address)) return;
+        const pre: AccountPreState = if (info) |i| .{
+            .nonce = i.nonce,
+            .balance = i.balance,
+            .code_hash = i.code_hash,
+        } else .{};
+        self.bal_pending_accounts.put(address, pre) catch {};
+    }
+
+    /// Record a storage slot at its pre-block value.
+    /// Uses first-access-wins per slot.
+    fn recordStorageAccess(self: *JournalInner, address: primitives.Address, key: primitives.StorageKey, value: primitives.StorageValue) void {
+        // Check permanent pre_storage first
+        if (self.bal_pre_storage.get(address)) |slots| {
+            if (slots.contains(key)) return;
+        }
+        // Check pending
+        if (self.bal_pending_storage.get(address)) |slots| {
+            if (slots.contains(key)) return;
+        }
+        const gop = self.bal_pending_storage.getOrPut(address) catch return;
+        if (!gop.found_existing) gop.value_ptr.* = std.AutoHashMap(primitives.StorageKey, primitives.StorageValue).init(alloc_mod.get());
+        gop.value_ptr.put(key, value) catch {};
+    }
+
+    /// Mark an address as an OOG phantom — it was loaded for gas calc but the
+    /// operation failed before the address was truly accessed. Removed from pending.
+    pub fn untrackAddress(self: *JournalInner, address: primitives.Address) void {
+        _ = self.bal_pending_accounts.remove(address);
+        self.bal_untracked.put(address, {}) catch {};
+    }
+
+    /// Force-add an address to the current-tx pending set (for EIP-7702 delegation targets
+    /// that execute but are never loaded via basic()).
+    pub fn forceTrackAddress(self: *JournalInner, address: primitives.Address) void {
+        if (self.bal_pre_accounts.contains(address) or self.bal_pending_accounts.contains(address)) return;
+        self.bal_pending_accounts.put(address, .{}) catch {};
+    }
+
+    /// Returns true if the address is legitimately tracked (not an OOG phantom).
+    pub fn isTrackedAddress(self: *const JournalInner, address: primitives.Address) bool {
+        if (self.bal_pre_accounts.contains(address)) return true;
+        if (self.bal_untracked.contains(address)) return false;
+        return self.bal_pending_accounts.contains(address);
+    }
+
+    /// Drain the accumulated Block Access Log. Flushes any remaining pending state
+    /// into the permanent maps and transfers ownership to the caller.
+    pub fn takeAccessLog(self: *JournalInner) AccessLog {
+        // Flush remaining pending (e.g. if called after last tx without commitTx)
+        var pa_it = self.bal_pending_accounts.iterator();
+        while (pa_it.next()) |e| {
+            if (!self.bal_pre_accounts.contains(e.key_ptr.*)) {
+                self.bal_pre_accounts.put(e.key_ptr.*, e.value_ptr.*) catch {};
+            }
+        }
+        self.bal_pending_accounts.clearRetainingCapacity();
+
+        var ps_it = self.bal_pending_storage.iterator();
+        while (ps_it.next()) |e| {
+            const addr = e.key_ptr.*;
+            var slot_it = e.value_ptr.iterator();
+            while (slot_it.next()) |s| {
+                const pre_gop = self.bal_pre_storage.getOrPut(addr) catch continue;
+                if (!pre_gop.found_existing) pre_gop.value_ptr.* = std.AutoHashMap(primitives.StorageKey, primitives.StorageValue).init(alloc_mod.get());
+                if (!pre_gop.value_ptr.contains(s.key_ptr.*)) {
+                    pre_gop.value_ptr.put(s.key_ptr.*, s.value_ptr.*) catch {};
+                }
+            }
+            e.value_ptr.deinit();
+        }
+        self.bal_pending_storage.clearRetainingCapacity();
+
+        const log = AccessLog{
+            .accounts = self.bal_pre_accounts,
+            .storage = self.bal_pre_storage,
+            .committed_changed = self.bal_committed_changed,
+        };
+        self.bal_pre_accounts = std.AutoHashMap(primitives.Address, AccountPreState).init(alloc_mod.get());
+        self.bal_pre_storage = std.AutoHashMap(primitives.Address, std.AutoHashMap(primitives.StorageKey, primitives.StorageValue)).init(alloc_mod.get());
+        self.bal_committed_changed = std.AutoHashMap(primitives.Address, std.AutoHashMap(primitives.StorageKey, void)).init(alloc_mod.get());
+        return log;
     }
 
     /// Returns the logs
@@ -441,6 +590,53 @@ pub const JournalInner = struct {
     ///
     /// `commit_tx` is used even for discarding transactions so transaction_id will be incremented.
     pub fn commitTx(self: *JournalInner) void {
+        // EIP-7928: record committed-changed storage BEFORE resetting original_value.
+        // Slots where present != original were dirty at this tx boundary; flag them so
+        // cross-tx net-zero writes are classified as storageChanges, not storageReads.
+        // Skip accounts created AND selfdestructed in the same tx (net zero effect).
+        {
+            var state_it = self.evm_state.iterator();
+            while (state_it.next()) |entry| {
+                if (entry.value_ptr.status.created and entry.value_ptr.status.self_destructed) continue;
+                var slot_it = entry.value_ptr.storage.iterator();
+                while (slot_it.next()) |slot| {
+                    if (slot.value_ptr.present_value != slot.value_ptr.original_value) {
+                        const addr = entry.key_ptr.*;
+                        const gop = self.bal_committed_changed.getOrPut(addr) catch continue;
+                        if (!gop.found_existing) gop.value_ptr.* = std.AutoHashMap(primitives.StorageKey, void).init(alloc_mod.get());
+                        gop.value_ptr.put(slot.key_ptr.*, {}) catch {};
+                    }
+                }
+            }
+        }
+
+        // EIP-7928: flush per-tx pending into permanent pre-state maps (first-access-wins).
+        {
+            var pa_it = self.bal_pending_accounts.iterator();
+            while (pa_it.next()) |e| {
+                if (!self.bal_pre_accounts.contains(e.key_ptr.*)) {
+                    self.bal_pre_accounts.put(e.key_ptr.*, e.value_ptr.*) catch {};
+                }
+            }
+            self.bal_pending_accounts.clearRetainingCapacity();
+
+            var ps_it = self.bal_pending_storage.iterator();
+            while (ps_it.next()) |e| {
+                const addr = e.key_ptr.*;
+                var slot_it = e.value_ptr.iterator();
+                while (slot_it.next()) |s| {
+                    const pre_gop = self.bal_pre_storage.getOrPut(addr) catch continue;
+                    if (!pre_gop.found_existing) pre_gop.value_ptr.* = std.AutoHashMap(primitives.StorageKey, primitives.StorageValue).init(alloc_mod.get());
+                    if (!pre_gop.value_ptr.contains(s.key_ptr.*)) {
+                        pre_gop.value_ptr.put(s.key_ptr.*, s.value_ptr.*) catch {};
+                    }
+                }
+                e.value_ptr.deinit();
+            }
+            self.bal_pending_storage.clearRetainingCapacity();
+            self.bal_untracked.clearRetainingCapacity();
+        }
+
         // Per EIP-2200/EIP-3529: after committing a transaction, the "original value"
         // of each storage slot becomes the committed (present) value. Without this,
         // subsequent transactions in the same block would incorrectly treat slots as
@@ -484,6 +680,12 @@ pub const JournalInner = struct {
         self.pending_burns.clearRetainingCapacity();
         self.transaction_id += 1;
         self.warm_addresses.clearCoinbaseAndAccessList();
+        // EIP-7928: discard per-tx pending tracking; pre_* survives (from prior txs).
+        self.bal_pending_accounts.clearRetainingCapacity();
+        var ps_it = self.bal_pending_storage.valueIterator();
+        while (ps_it.next()) |m| m.deinit();
+        self.bal_pending_storage.clearRetainingCapacity();
+        self.bal_untracked.clearRetainingCapacity();
     }
 
     /// Take the [`EvmState`] and clears the journal by resetting it to initial state.
@@ -1057,6 +1259,11 @@ pub const JournalInner = struct {
             gop.value_ptr.* = new_account;
             is_cold = acct_is_cold;
             account_ptr = gop.value_ptr;
+            // EIP-7928: record pre-block account state at first load (using already-fetched info).
+            self.recordAccountAccess(
+                address,
+                if (gop.value_ptr.isLoadedAsNotExisting()) null else gop.value_ptr.info,
+            );
         }
 
         // Journal cold account load
@@ -1125,13 +1332,10 @@ pub const JournalInner = struct {
             if (skip_cold_load) {
                 return JournalLoadError.ColdLoadSkipped;
             }
-            // For newly-created accounts all storage is implicitly zero.  Notify
-            // the fallback (e.g. WitnessDatabase) so it can record the slot for
-            // EIP-7928 BAL tracking without performing an MPT proof lookup.
-            const value = if (is_newly_created) blk: {
-                if (@hasDecl(@TypeOf(db.*), "notifyStorageRead")) db.notifyStorageRead(address, key);
-                break :blk @as(primitives.StorageValue, 0);
-            } else try db.storage(address, key);
+            // For newly-created accounts all storage is implicitly zero (no DB lookup needed).
+            const value = if (is_newly_created) @as(primitives.StorageValue, 0) else try db.storage(address, key);
+            // EIP-7928: record pre-block storage value at first access.
+            self.recordStorageAccess(address, key, value);
             try account.storage.put(key, state.EvmStorageSlot.new(value, self.transaction_id));
             const is_cold = !self.warm_addresses.isStorageWarm(address, key);
             if (is_cold) {
@@ -1419,46 +1623,24 @@ pub fn Journal(comptime DB: type) type {
             return self.inner.isStorageCold(address, key);
         }
 
-        /// Un-record a pending address access in the database fallback.
-        /// Called when a CALL loaded an address for gas calculation but went OOG.
+        /// Mark an address as an OOG phantom — loaded for gas calc but operation went OOG.
         pub fn untrackAddress(self: *@This(), address: primitives.Address) void {
-            if (comptime @hasDecl(DB, "untrackAddress")) self.getDbMut().untrackAddress(address);
+            self.inner.untrackAddress(address);
         }
 
-        /// Force-add an address to the current-tx access log in the database fallback.
-        /// Used for EIP-7702 delegation targets that execute but are not in the witness.
+        /// Force-add an address to the current-tx access log (EIP-7702 delegation targets).
         pub fn forceTrackAddress(self: *@This(), address: primitives.Address) void {
-            if (comptime @hasDecl(DB, "forceTrackAddress")) self.getDbMut().forceTrackAddress(address);
+            self.inner.forceTrackAddress(address);
         }
 
-        /// Notify the DB that a new call frame is starting (EIP-7928 BAL tracking).
-        pub fn snapshotFrame(self: *@This()) void {
-            if (comptime @hasDecl(DB, "snapshotFrame")) self.getDbMut().snapshotFrame();
+        /// Returns true if the address is legitimately tracked (not an OOG phantom).
+        pub fn isTrackedAddress(self: *const @This(), address: primitives.Address) bool {
+            return self.inner.isTrackedAddress(address);
         }
 
-        /// Commit the current call frame's accesses to the parent frame (EIP-7928).
-        pub fn commitFrame(self: *@This()) void {
-            if (comptime @hasDecl(DB, "commitFrame")) self.getDbMut().commitFrame();
-        }
-
-        /// Revert the current call frame's accesses (EIP-7928, on revert/OOG).
-        pub fn revertFrame(self: *@This()) void {
-            if (comptime @hasDecl(DB, "revertFrame")) self.getDbMut().revertFrame();
-        }
-
-        /// Commit all tracked accesses for this transaction to the block-level BAL.
-        pub fn commitTracking(self: *@This()) void {
-            if (comptime @hasDecl(DB, "commitTracking")) self.getDbMut().commitTracking();
-        }
-
-        /// Discard all tracked accesses for this transaction (on tx revert/failure).
-        pub fn discardTracking(self: *@This()) void {
-            if (comptime @hasDecl(DB, "discardTracking")) self.getDbMut().discardTracking();
-        }
-
-        /// Notify the DB that a storage slot was committed (EIP-7928 write tracking).
-        pub fn notifyStorageSlotCommit(self: *@This(), addr: primitives.Address, key: primitives.StorageKey, val: primitives.StorageValue) void {
-            if (comptime @hasDecl(DB, "notifyStorageSlotCommit")) self.getDbMut().notifyStorageSlotCommit(addr, key, val);
+        /// Drain the accumulated Block Access Log for EIP-7928 validation.
+        pub fn takeAccessLog(self: *@This()) AccessLog {
+            return self.inner.takeAccessLog();
         }
 
         /// Returns true if the address has any non-zero storage in the DB.

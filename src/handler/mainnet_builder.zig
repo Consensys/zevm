@@ -358,15 +358,12 @@ pub const MainnetHandler = struct {
 
                 // Take checkpoint for top-level CALL: state is reverted through this on failure.
                 const call_checkpoint = ctx.journaled_state.getCheckpoint();
-                // Notify db fallback that a new frame has opened (checkpoint-aware tracking).
-                ctx.journaled_state.snapshotFrame();
 
                 // Value transfer for top-level CALL.
                 if (tx.value > 0) {
                     const xfer_err = try ctx.journaled_state.transfer(tx.caller, target, tx.value);
                     if (xfer_err != null) {
                         ctx.journaled_state.checkpointRevert(call_checkpoint);
-                        ctx.journaled_state.revertFrame();
                         return main.FrameResult.new(
                             main.ExecutionResult.new(.Fail, exec_gas),
                             0,
@@ -388,7 +385,6 @@ pub const MainnetHandler = struct {
                         .success => |out| {
                             if (out.reverted) {
                                 ctx.journaled_state.checkpointRevert(call_checkpoint);
-                                ctx.journaled_state.revertFrame();
                                 return main.FrameResult.new(
                                     main.ExecutionResult.new(.Revert, exec_gas),
                                     0,
@@ -396,7 +392,6 @@ pub const MainnetHandler = struct {
                                 );
                             }
                             ctx.journaled_state.checkpointCommit();
-                            ctx.journaled_state.commitFrame();
                             var fr = main.FrameResult.new(
                                 main.ExecutionResult.new(.Success, out.gas_used),
                                 tx_regular_exec_gas - out.gas_used,
@@ -407,7 +402,6 @@ pub const MainnetHandler = struct {
                         },
                         .err => {
                             ctx.journaled_state.checkpointRevert(call_checkpoint);
-                            ctx.journaled_state.revertFrame();
                             return main.FrameResult.new(
                                 main.ExecutionResult.new(.Fail, exec_gas),
                                 0,
@@ -440,10 +434,8 @@ pub const MainnetHandler = struct {
 
                 if (ir.raw_result.isSuccess()) {
                     ctx.journaled_state.checkpointCommit();
-                    ctx.journaled_state.commitFrame();
                 } else {
                     ctx.journaled_state.checkpointRevert(call_checkpoint);
-                    ctx.journaled_state.revertFrame();
                 }
 
                 const status: main.ExecutionStatus = switch (ir.raw_result) {
@@ -571,30 +563,9 @@ pub const MainnetHandler = struct {
             result.result.logs = js.takeLogs();
         }
 
-        // 7. Commit transaction state
-        // Before committing, notify the fallback about storage slots being committed
-        // with a changed value. This lets WitnessDatabase track cross-tx intermediate
-        // writes for EIP-7928 BAL validation (storageChanges vs storageReads).
-        // Must be done BEFORE commitTx() resets original_value = present_value.
-        {
-            var state_it = js.inner.evm_state.iterator();
-            while (state_it.next()) |entry| {
-                // Skip accounts that were both created AND selfdestructed in the same tx:
-                // their storage writes have zero net effect and should not be recorded as
-                // committed changes for EIP-7928 BAL (they become storageReads, not storageChanges).
-                if (entry.value_ptr.status.created and entry.value_ptr.status.self_destructed) continue;
-                var slot_it = entry.value_ptr.storage.iterator();
-                while (slot_it.next()) |slot| {
-                    if (slot.value_ptr.present_value != slot.value_ptr.original_value) {
-                        js.notifyStorageSlotCommit(entry.key_ptr.*, slot.key_ptr.*, slot.value_ptr.present_value);
-                    }
-                }
-            }
-        }
+        // 7. Commit transaction state.
+        // commitTx() records committed-changed storage and flushes per-tx BAL tracking internally.
         js.commitTx();
-        // Notify fallback database that this transaction committed.
-        // WitnessDatabase uses this to flush per-tx pending tracking to the permanent access log.
-        js.commitTracking();
 
         // 8. Update ExecutionResult with final accounting.
         // EIP-7778 (Amsterdam+): block gas does NOT deduct refunds.
@@ -630,10 +601,8 @@ pub const MainnetHandler = struct {
     /// Handle errors — revert journal, discard tx.
     pub fn catchError(evm: anytype, _: anyerror) void {
         const ctx = evm.getContext();
-        // Revert all state changes from this transaction
+        // Revert all state changes from this transaction (also clears per-tx BAL pending).
         ctx.journaled_state.discardTx();
-        // Notify fallback database that this transaction was discarded.
-        ctx.journaled_state.discardTracking();
     }
 };
 
