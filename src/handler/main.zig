@@ -209,42 +209,49 @@ pub const FrameData = struct {
     }
 };
 
-/// EVM execution engine. Holds pointers to a Context and supporting resources.
-pub const Evm = struct {
-    ctx: *context.Context,
-    inspector: ?*Inspector,
-    instructions: *Instructions,
-    precompiles: *Precompiles,
-    frame_stack: *FrameStack,
-
-    pub fn init(
-        ctx: *context.Context,
+/// Generic EVM parametrised over a DB type.
+/// `Evm = EvmFor(database.InMemoryDB)` is the default used throughout zevm.
+/// External users (zevm-stateless) can instantiate EvmFor(their_db) directly.
+pub fn EvmFor(comptime DB: type) type {
+    return struct {
+        ctx: *context.Context(DB),
         inspector: ?*Inspector,
         instructions: *Instructions,
         precompiles: *Precompiles,
         frame_stack: *FrameStack,
-    ) Evm {
-        return .{
-            .ctx = ctx,
-            .inspector = inspector,
-            .instructions = instructions,
-            .precompiles = precompiles,
-            .frame_stack = frame_stack,
-        };
-    }
 
-    pub fn getContext(self: *Evm) *context.Context {
-        return self.ctx;
-    }
+        pub fn init(
+            ctx: *context.Context(DB),
+            inspector: ?*Inspector,
+            instructions: *Instructions,
+            precompiles: *Precompiles,
+            frame_stack: *FrameStack,
+        ) @This() {
+            return .{
+                .ctx = ctx,
+                .inspector = inspector,
+                .instructions = instructions,
+                .precompiles = precompiles,
+                .frame_stack = frame_stack,
+            };
+        }
 
-    pub fn createFrame(self: *Evm, frame_data: FrameData) !Frame {
-        return Frame.init(frame_data, self.instructions, self.precompiles);
-    }
+        pub fn getContext(self: *@This()) *context.Context(DB) {
+            return self.ctx;
+        }
 
-    pub fn executeFrame(self: *Evm, frame: *Frame) !FrameResult {
-        return frame.execute(self.ctx);
-    }
-};
+        pub fn createFrame(self: *@This(), frame_data: FrameData) !Frame {
+            return Frame.init(frame_data, self.instructions, self.precompiles);
+        }
+
+        pub fn executeFrame(self: *@This(), frame: *Frame) !FrameResult {
+            return frame.execute(self.ctx);
+        }
+    };
+}
+
+/// Default EVM for InMemoryDB — drop-in for all existing zevm code.
+pub const Evm = EvmFor(database.InMemoryDB);
 
 /// Frame for execution
 pub const Frame = struct {
@@ -292,12 +299,13 @@ pub const Frame = struct {
     }
 
     /// Execute frame with host access for full EVM semantics.
-    pub fn execute(self: *Frame, ctx: *context.Context) !FrameResult {
+    pub fn execute(self: *Frame, ctx: anytype) !FrameResult {
+        const DB = @TypeOf(ctx.*).DatabaseType;
         const schedule = interpreter.protocol_schedule.ProtocolSchedule.forSpec(
             self.interpreter.runtime_flags.spec_id,
         );
 
-        var host = interpreter.Host.init(ctx, &self.precompiles.precompiles);
+        var host = interpreter.Host.init(DB, ctx, &self.precompiles.precompiles);
 
         _ = self.interpreter.runWithHost(&schedule.instructions, &host);
 

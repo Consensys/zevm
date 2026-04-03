@@ -18,7 +18,7 @@ pub fn main() !void {
     defer db.deinit();
 
     // Create a context with Prague specification
-    var ctx = context.DefaultContext.new(database.Database.forDb(database.InMemoryDB, &db), primitives.SpecId.prague);
+    var ctx = context.DefaultContext.new(db, primitives.SpecId.prague);
 
     // Create a simple contract that adds two numbers
     // PUSH1 0x05  (push 5 onto stack)

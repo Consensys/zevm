@@ -214,10 +214,10 @@ pub fn runTestCase(tc: types.TestCase, allocator: std.mem.Allocator) TestOutcome
         }
     }
 
-    // Build context backed by db (db must outlive ctx).
-    var ctx = context.DefaultContext.new(database.Database.forDb(database.InMemoryDB, &db), spec);
+    // Build context (db is moved into Context by value)
+    var ctx = context.DefaultContext.new(db, spec);
     // InMemoryDB uses the GPA allocator; free its hash maps on all exit paths.
-    defer db.deinit();
+    defer ctx.journaled_state.database.deinit();
 
     // Osaka: EIP-7825 transaction gas limit cap = 2^24
     if (spec == .osaka) {
@@ -498,10 +498,10 @@ pub fn runTestCase(tc: types.TestCase, allocator: std.mem.Allocator) TestOutcome
                 if (account.storage.get(key)) |slot| {
                     actual_val = slot.presentValue();
                 } else {
-                    actual_val = db.getStorage(expected_acct.address, key) catch 0;
+                    actual_val = ctx.journaled_state.database.getStorage(expected_acct.address, key) catch 0;
                 }
             } else {
-                actual_val = db.getStorage(expected_acct.address, key) catch 0;
+                actual_val = ctx.journaled_state.database.getStorage(expected_acct.address, key) catch 0;
             }
 
             if (actual_val != expected_val) {

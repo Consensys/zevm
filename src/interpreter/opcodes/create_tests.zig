@@ -121,8 +121,8 @@ test "create2Address: different salts produce different addresses" {
 // Helpers for opcode handler tests
 // ---------------------------------------------------------------------------
 
-fn makeCtx(db: *database_mod.InMemoryDB) context_mod.DefaultContext {
-    return context_mod.DefaultContext.new(database_mod.Database.forDb(database_mod.InMemoryDB, db), .prague);
+fn makeCtx(db: database_mod.InMemoryDB) context_mod.DefaultContext {
+    return context_mod.DefaultContext.new(db, .prague);
 }
 
 fn makeInterp(target: primitives.Address, gas_limit: u64) Interpreter {
@@ -152,7 +152,7 @@ fn makeInterp(target: primitives.Address, gas_limit: u64) Interpreter {
 test "opCreate: stack underflow with fewer than 3 items" {
     var db = database_mod.InMemoryDB.init(ALLOC);
     try db.insertAccount(CALLER, state_mod.AccountInfo.new(1_000_000, 0, primitives.KECCAK_EMPTY, bytecode_mod.Bytecode.new()));
-    var ctx = makeCtx(&db);
+    var ctx = makeCtx(db);
     _ = try ctx.journaled_state.loadAccount(CALLER);
 
     var interp = makeInterp(CALLER, 100_000);
@@ -171,7 +171,7 @@ test "opCreate: stack underflow with fewer than 3 items" {
 test "opCreate: static context halts with invalid_static" {
     var db = database_mod.InMemoryDB.init(ALLOC);
     try db.insertAccount(CALLER, state_mod.AccountInfo.new(1_000_000, 0, primitives.KECCAK_EMPTY, bytecode_mod.Bytecode.new()));
-    var ctx = makeCtx(&db);
+    var ctx = makeCtx(db);
     _ = try ctx.journaled_state.loadAccount(CALLER);
 
     var interp = makeInterp(CALLER, 100_000);
@@ -192,7 +192,7 @@ test "opCreate: static context halts with invalid_static" {
 test "opCreate2: stack underflow with fewer than 4 items" {
     var db = database_mod.InMemoryDB.init(ALLOC);
     try db.insertAccount(CALLER, state_mod.AccountInfo.new(1_000_000, 0, primitives.KECCAK_EMPTY, bytecode_mod.Bytecode.new()));
-    var ctx = makeCtx(&db);
+    var ctx = makeCtx(db);
     _ = try ctx.journaled_state.loadAccount(CALLER);
 
     var interp = makeInterp(CALLER, 100_000);
@@ -218,7 +218,7 @@ test "opCreate: STOP init code deploys empty contract, returns non-zero address"
     var db = database_mod.InMemoryDB.init(ALLOC);
     // Caller nonce = 1 so we can predict the CREATE address
     try db.insertAccount(CALLER, state_mod.AccountInfo.new(1_000_000, 1, primitives.KECCAK_EMPTY, bytecode_mod.Bytecode.new()));
-    var ctx = makeCtx(&db);
+    var ctx = makeCtx(db);
     _ = try ctx.journaled_state.loadAccount(CALLER);
 
     var interp = makeInterp(CALLER, 500_000);
@@ -250,7 +250,7 @@ test "opCreate2: same inputs produce same address on stack" {
         fn exec() !U {
             var db = database_mod.InMemoryDB.init(ALLOC);
             try db.insertAccount(CALLER, state_mod.AccountInfo.new(1_000_000, 1, primitives.KECCAK_EMPTY, bytecode_mod.Bytecode.new()));
-            var ctx = makeCtx(&db);
+            var ctx = makeCtx(db);
             _ = try ctx.journaled_state.loadAccount(CALLER);
 
             var interp = makeInterp(CALLER, 500_000);
@@ -286,7 +286,7 @@ test "opCreate: collision at derived address returns 0" {
 
     var db = database_mod.InMemoryDB.init(ALLOC);
     try db.insertAccount(CALLER, state_mod.AccountInfo.new(1_000_000, 1, primitives.KECCAK_EMPTY, bytecode_mod.Bytecode.new()));
-    var ctx = makeCtx(&db);
+    var ctx = makeCtx(db);
     _ = try ctx.journaled_state.loadAccount(CALLER);
 
     // First CREATE — succeeds, nonce bumped from 1→2

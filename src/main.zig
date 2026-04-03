@@ -36,11 +36,10 @@ pub const KECCAK_EMPTY = primitives.KECCAK_EMPTY;
 pub const ONE_ETHER = primitives.ONE_ETHER;
 pub const ONE_GWEI = primitives.ONE_GWEI;
 
-/// Main EVM context builder.
-/// The caller must keep `db` alive for the lifetime of the returned context.
-pub fn createMainnetContext(allocator: std.mem.Allocator, db: *database.InMemoryDB) context.DefaultContext {
-    db.* = database.InMemoryDB.init(allocator);
-    return context.DefaultContext.new(database.Database.forDb(database.InMemoryDB, db), .prague);
+/// Main EVM context builder
+pub fn createMainnetContext(allocator: std.mem.Allocator) context.DefaultContext {
+    const db = database.InMemoryDB.init(allocator);
+    return context.DefaultContext.new(db, .prague);
 }
 
 /// Execute a transaction in the EVM

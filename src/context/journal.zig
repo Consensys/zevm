@@ -442,6 +442,8 @@ pub const JournalInner = struct {
     bal_pending_storage: std.AutoHashMap(primitives.Address, std.AutoHashMap(primitives.StorageKey, primitives.StorageValue)),
     // Slots committed to a non-pre-block value at any tx boundary.
     bal_committed_changed: std.AutoHashMap(primitives.Address, std.AutoHashMap(primitives.StorageKey, void)),
+    // Addresses loaded only for gas calculation that went OOG (excluded from BAL).
+    bal_untracked: std.AutoHashMap(primitives.Address, void),
 
     pub fn new() JournalInner {
         return .{
@@ -458,6 +460,7 @@ pub const JournalInner = struct {
             .bal_pending_accounts = std.AutoHashMap(primitives.Address, AccountPreState).init(alloc_mod.get()),
             .bal_pending_storage = std.AutoHashMap(primitives.Address, std.AutoHashMap(primitives.StorageKey, primitives.StorageValue)).init(alloc_mod.get()),
             .bal_committed_changed = std.AutoHashMap(primitives.Address, std.AutoHashMap(primitives.StorageKey, void)).init(alloc_mod.get()),
+            .bal_untracked = std.AutoHashMap(primitives.Address, void).init(alloc_mod.get()),
         };
     }
 
@@ -480,6 +483,7 @@ pub const JournalInner = struct {
         var cc_it = self.bal_committed_changed.valueIterator();
         while (cc_it.next()) |m| m.deinit();
         self.bal_committed_changed.deinit();
+        self.bal_untracked.deinit();
     }
 
     // ── EIP-7928 BAL tracking helpers ─────────────────────────────────────────
@@ -512,10 +516,25 @@ pub const JournalInner = struct {
         gop.value_ptr.put(key, value) catch {};
     }
 
-    /// Returns true if the address has been accessed (appears in the BAL).
-    /// Phantom accesses are prevented at the opcode level, so all tracked addresses are legitimate.
+    /// Mark an address as an OOG phantom — it was loaded for gas calc but the
+    /// operation failed before the address was truly accessed. Removed from pending.
+    pub fn untrackAddress(self: *JournalInner, address: primitives.Address) void {
+        _ = self.bal_pending_accounts.remove(address);
+        self.bal_untracked.put(address, {}) catch {};
+    }
+
+    /// Force-add an address to the current-tx pending set (for EIP-7702 delegation targets
+    /// that execute but are never loaded via basic()).
+    pub fn forceTrackAddress(self: *JournalInner, address: primitives.Address) void {
+        if (self.bal_pre_accounts.contains(address) or self.bal_pending_accounts.contains(address)) return;
+        self.bal_pending_accounts.put(address, .{}) catch {};
+    }
+
+    /// Returns true if the address is legitimately tracked (not an OOG phantom).
     pub fn isTrackedAddress(self: *const JournalInner, address: primitives.Address) bool {
-        return self.bal_pre_accounts.contains(address) or self.bal_pending_accounts.contains(address);
+        if (self.bal_pre_accounts.contains(address)) return true;
+        if (self.bal_untracked.contains(address)) return false;
+        return self.bal_pending_accounts.contains(address);
     }
 
     /// Drain the accumulated Block Access Log. Flushes any remaining pending state
@@ -615,6 +634,7 @@ pub const JournalInner = struct {
                 e.value_ptr.deinit();
             }
             self.bal_pending_storage.clearRetainingCapacity();
+            self.bal_untracked.clearRetainingCapacity();
         }
 
         // Per EIP-2200/EIP-3529: after committing a transaction, the "original value"
@@ -665,6 +685,7 @@ pub const JournalInner = struct {
         var ps_it = self.bal_pending_storage.valueIterator();
         while (ps_it.next()) |m| m.deinit();
         self.bal_pending_storage.clearRetainingCapacity();
+        self.bal_untracked.clearRetainingCapacity();
     }
 
     /// Take the [`EvmState`] and clears the journal by resetting it to initial state.
@@ -1393,240 +1414,253 @@ pub const JournalInner = struct {
     }
 };
 
-/// A journal of evm_state changes internal to the EVM.
+/// A journal of evm_state changes internal to the EVM
 ///
 /// On each additional call, the depth of the journaled evm_state is increased (`depth`) and a new journal is added.
 ///
 /// The journal contains every evm_state change that happens within that call, making it possible to revert changes made in a specific call.
-pub const Journal = struct {
-    /// Database (type-erased vtable)
-    database: database.Database,
-    /// Inner journal state.
-    inner: JournalInner,
+pub fn Journal(comptime DB: type) type {
+    return struct {
+        /// Database
+        database: DB,
+        /// Inner journal state.
+        inner: JournalInner,
 
-    pub fn new(db: database.Database) Journal {
-        return .{
-            .database = db,
-            .inner = JournalInner.new(),
-        };
-    }
+        pub fn new(db: DB) @This() {
+            return .{
+                .database = db,
+                .inner = JournalInner.new(),
+            };
+        }
 
-    pub fn deinit(self: *Journal) void {
-        self.inner.deinit();
-    }
+        pub fn deinit(self: *@This()) void {
+            self.inner.deinit();
+        }
 
-    /// Creates a new JournaledState by copying evm_state data from a JournalInit and provided database.
-    /// This allows reusing the evm_state, logs, and other data from a previous execution context while
-    /// connecting it to a different database backend.
-    pub fn newWithInner(db: database.Database, inner: JournalInner) Journal {
-        return .{ .database = db, .inner = inner };
-    }
+        /// Creates a new JournaledState by copying evm_state data from a JournalInit and provided database.
+        /// This allows reusing the evm_state, logs, and other data from a previous execution context while
+        /// connecting it to a different database backend.
+        pub fn newWithInner(db: DB, inner: JournalInner) @This() {
+            return .{ .database = db, .inner = inner };
+        }
 
-    /// Consumes the [`Journal`] and returns [`JournalInner`].
-    ///
-    /// If you need to preserve the original journal, use [`Self::to_inner`] instead which clones the state.
-    pub fn intoInit(self: Journal) JournalInner {
-        return self.inner;
-    }
+        /// Consumes the [`Journal`] and returns [`JournalInner`].
+        ///
+        /// If you need to preserve the original journal, use [`Self::to_inner`] instead which clones the state.
+        pub fn intoInit(self: @This()) JournalInner {
+            return self.inner;
+        }
 
-    /// Creates a new [`JournalInner`] by cloning all internal evm_state data (evm_state, storage, logs, etc)
-    /// This allows creating a new journaled evm_state with the same evm_state data but without
-    /// carrying over the original database.
-    ///
-    /// This is useful when you want to reuse the current evm_state for a new transaction or
-    /// execution context, but want to start with a fresh database.
-    pub fn toInner(self: Journal) JournalInner {
-        return self.inner;
-    }
+        /// Creates a new [`JournalInner`] by cloning all internal evm_state data (evm_state, storage, logs, etc)
+        /// This allows creating a new journaled evm_state with the same evm_state data but without
+        /// carrying over the original database.
+        ///
+        /// This is useful when you want to reuse the current evm_state for a new transaction or
+        /// execution context, but want to start with a fresh database.
+        pub fn toInner(self: @This()) JournalInner {
+            return self.inner;
+        }
 
-    pub fn getDb(self: *const Journal) *const database.Database {
-        return &self.database;
-    }
+        pub fn getDb(self: *const @This()) *const DB {
+            return &self.database;
+        }
 
-    pub fn getDbMut(self: *Journal) *database.Database {
-        return &self.database;
-    }
+        pub fn getDbMut(self: *@This()) *DB {
+            return &self.database;
+        }
 
-    pub fn sload(self: *Journal, address: primitives.Address, key: primitives.StorageKey) !StateLoad(primitives.StorageValue) {
-        return self.inner.sload(self.getDbMut(), address, key, false);
-    }
+        pub fn sload(self: *@This(), address: primitives.Address, key: primitives.StorageKey) !StateLoad(primitives.StorageValue) {
+            return self.inner.sload(self.getDbMut(), address, key, false);
+        }
 
-    pub fn sstore(self: *Journal, address: primitives.Address, key: primitives.StorageKey, value: primitives.StorageValue) !StateLoad(SStoreResult) {
-        return self.inner.sstore(self.getDbMut(), address, key, value, false);
-    }
+        pub fn sstore(self: *@This(), address: primitives.Address, key: primitives.StorageKey, value: primitives.StorageValue) !StateLoad(SStoreResult) {
+            return self.inner.sstore(self.getDbMut(), address, key, value, false);
+        }
 
-    pub fn tload(self: *Journal, address: primitives.Address, key: primitives.StorageKey) primitives.StorageValue {
-        return self.inner.tload(address, key);
-    }
+        pub fn tload(self: *@This(), address: primitives.Address, key: primitives.StorageKey) primitives.StorageValue {
+            return self.inner.tload(address, key);
+        }
 
-    pub fn tstore(self: *Journal, address: primitives.Address, key: primitives.StorageKey, value: primitives.StorageValue) void {
-        self.inner.tstore(address, key, value);
-    }
+        pub fn tstore(self: *@This(), address: primitives.Address, key: primitives.StorageKey, value: primitives.StorageValue) void {
+            self.inner.tstore(address, key, value);
+        }
 
-    pub fn log(self: *Journal, log_entry: primitives.Log) void {
-        self.inner.addLog(log_entry);
-    }
+        pub fn log(self: *@This(), log_entry: primitives.Log) void {
+            self.inner.addLog(log_entry);
+        }
 
-    pub fn selfdestruct(self: *Journal, address: primitives.Address, target: primitives.Address) !StateLoad(SelfDestructResult) {
-        return self.inner.selfdestruct(self.getDbMut(), address, target);
-    }
+        pub fn selfdestruct(self: *@This(), address: primitives.Address, target: primitives.Address) !StateLoad(SelfDestructResult) {
+            return self.inner.selfdestruct(self.getDbMut(), address, target);
+        }
 
-    pub fn warmAccessList(self: *Journal, access_list: std.AutoHashMap(primitives.Address, std.ArrayList(primitives.StorageKey))) !void {
-        try self.inner.warm_addresses.setAccessList(access_list);
-    }
+        pub fn warmAccessList(self: *@This(), access_list: std.AutoHashMap(primitives.Address, std.ArrayList(primitives.StorageKey))) !void {
+            try self.inner.warm_addresses.setAccessList(access_list);
+        }
 
-    pub fn warmCoinbaseAccount(self: *Journal, address: primitives.Address) void {
-        self.inner.warm_addresses.setCoinbase(address);
-    }
+        pub fn warmCoinbaseAccount(self: *@This(), address: primitives.Address) void {
+            self.inner.warm_addresses.setCoinbase(address);
+        }
 
-    pub fn warmPrecompiles(self: *Journal, precompiles: []const primitives.Address) !void {
-        try self.inner.warm_addresses.setPrecompileAddresses(precompiles);
-    }
+        pub fn warmPrecompiles(self: *@This(), precompiles: []const primitives.Address) !void {
+            try self.inner.warm_addresses.setPrecompileAddresses(precompiles);
+        }
 
-    pub fn precompileAddresses(self: Journal) []const primitives.Address {
-        return self.inner.warm_addresses.precompiles();
-    }
+        pub fn precompileAddresses(self: @This()) []const primitives.Address {
+            return self.inner.warm_addresses.precompiles();
+        }
 
-    pub fn setSpecId(self: *Journal, spec_id: primitives.SpecId) void {
-        self.inner.setSpecId(spec_id);
-    }
+        pub fn setSpecId(self: *@This(), spec_id: primitives.SpecId) void {
+            self.inner.setSpecId(spec_id);
+        }
 
-    pub fn transfer(self: *Journal, from: primitives.Address, to: primitives.Address, balance: primitives.U256) !?TransferError {
-        return self.inner.transfer(self.getDbMut(), from, to, balance);
-    }
+        pub fn transfer(self: *@This(), from: primitives.Address, to: primitives.Address, balance: primitives.U256) !?TransferError {
+            return self.inner.transfer(self.getDbMut(), from, to, balance);
+        }
 
-    pub fn transferLoaded(self: *Journal, from: primitives.Address, to: primitives.Address, balance: primitives.U256) ?TransferError {
-        return self.inner.transferLoaded(from, to, balance);
-    }
+        pub fn transferLoaded(self: *@This(), from: primitives.Address, to: primitives.Address, balance: primitives.U256) ?TransferError {
+            return self.inner.transferLoaded(from, to, balance);
+        }
 
-    pub fn touchAccount(self: *Journal, address: primitives.Address) void {
-        self.inner.touch(address);
-    }
+        pub fn touchAccount(self: *@This(), address: primitives.Address) void {
+            self.inner.touch(address);
+        }
 
-    pub fn callerAccountingJournalEntry(self: *Journal, address: primitives.Address, old_balance: primitives.U256, bump_nonce: bool) void {
-        self.inner.callerAccountingJournalEntry(address, old_balance, bump_nonce);
-    }
+        pub fn callerAccountingJournalEntry(self: *@This(), address: primitives.Address, old_balance: primitives.U256, bump_nonce: bool) void {
+            self.inner.callerAccountingJournalEntry(address, old_balance, bump_nonce);
+        }
 
-    /// Increments the balance of the account.
-    pub fn balanceIncr(self: *Journal, address: primitives.Address, balance: primitives.U256) !void {
-        try self.inner.balanceIncr(self.getDbMut(), address, balance);
-    }
+        /// Increments the balance of the account.
+        pub fn balanceIncr(self: *@This(), address: primitives.Address, balance: primitives.U256) !void {
+            try self.inner.balanceIncr(self.getDbMut(), address, balance);
+        }
 
-    /// Increments the nonce of the account.
-    pub fn nonceBumpJournalEntry(self: *Journal, address: primitives.Address) void {
-        self.inner.nonceBumpJournalEntry(address);
-    }
+        /// Increments the nonce of the account.
+        pub fn nonceBumpJournalEntry(self: *@This(), address: primitives.Address) void {
+            self.inner.nonceBumpJournalEntry(address);
+        }
 
-    pub fn loadAccount(self: *Journal, address: primitives.Address) !StateLoad(*const state.Account) {
-        return self.inner.loadAccount(self.getDbMut(), address);
-    }
+        pub fn loadAccount(self: *@This(), address: primitives.Address) !StateLoad(*const state.Account) {
+            return self.inner.loadAccount(self.getDbMut(), address);
+        }
 
-    pub fn loadAccountMutOptionalCode(self: *Journal, address: primitives.Address, load_code: bool, skip_cold_load: bool) !StateLoad(JournaledAccount) {
-        return self.inner.loadAccountMutOptionalCode(self.getDbMut(), address, load_code, skip_cold_load);
-    }
+        pub fn loadAccountMutOptionalCode(self: *@This(), address: primitives.Address, load_code: bool, skip_cold_load: bool) !StateLoad(JournaledAccount) {
+            return self.inner.loadAccountMutOptionalCode(self.getDbMut(), address, load_code, skip_cold_load);
+        }
 
-    pub fn loadAccountWithCode(self: *Journal, address: primitives.Address) !StateLoad(*const state.Account) {
-        return self.inner.loadCode(self.getDbMut(), address);
-    }
+        pub fn loadAccountWithCode(self: *@This(), address: primitives.Address) !StateLoad(*const state.Account) {
+            return self.inner.loadCode(self.getDbMut(), address);
+        }
 
-    pub fn loadAccountDelegated(self: *Journal, address: primitives.Address) !StateLoad(AccountLoad) {
-        return self.inner.loadAccountDelegated(self.getDbMut(), address);
-    }
+        pub fn loadAccountDelegated(self: *@This(), address: primitives.Address) !StateLoad(AccountLoad) {
+            return self.inner.loadAccountDelegated(self.getDbMut(), address);
+        }
 
-    pub fn getCheckpoint(self: *Journal) JournalCheckpoint {
-        return self.inner.getCheckpoint();
-    }
+        pub fn getCheckpoint(self: *@This()) JournalCheckpoint {
+            return self.inner.getCheckpoint();
+        }
 
-    pub fn checkpointCommit(self: *Journal) void {
-        self.inner.checkpointCommit();
-    }
+        pub fn checkpointCommit(self: *@This()) void {
+            self.inner.checkpointCommit();
+        }
 
-    pub fn checkpointRevert(self: *Journal, checkpoint: JournalCheckpoint) void {
-        self.inner.checkpointRevert(checkpoint);
-    }
+        pub fn checkpointRevert(self: *@This(), checkpoint: JournalCheckpoint) void {
+            self.inner.checkpointRevert(checkpoint);
+        }
 
-    pub fn setCodeWithHash(self: *Journal, address: primitives.Address, code: bytecode.Bytecode, hash: primitives.Hash) void {
-        self.inner.setCodeWithHash(address, code, hash);
-    }
+        pub fn setCodeWithHash(self: *@This(), address: primitives.Address, code: bytecode.Bytecode, hash: primitives.Hash) void {
+            self.inner.setCodeWithHash(address, code, hash);
+        }
 
-    pub fn createAccountCheckpoint(self: *Journal, caller: primitives.Address, address: primitives.Address, balance: primitives.U256, spec_id: primitives.SpecId) !JournalCheckpoint {
-        // Ignore error.
-        return self.inner.createAccountCheckpoint(caller, address, balance, spec_id);
-    }
+        pub fn createAccountCheckpoint(self: *@This(), caller: primitives.Address, address: primitives.Address, balance: primitives.U256, spec_id: primitives.SpecId) !JournalCheckpoint {
+            // Ignore error.
+            return self.inner.createAccountCheckpoint(caller, address, balance, spec_id);
+        }
 
-    pub fn takeLogs(self: *Journal) std.ArrayList(primitives.Log) {
-        return self.inner.takeLogs();
-    }
+        pub fn takeLogs(self: *@This()) std.ArrayList(primitives.Log) {
+            return self.inner.takeLogs();
+        }
 
-    /// EIP-7708: Emit a Transfer log (Amsterdam+). Caller must already have verified
-    /// that `from != to` and `amount > 0` and that the spec is Amsterdam or later.
-    pub fn emitTransferLog(self: *Journal, from: primitives.Address, to: primitives.Address, amount: primitives.U256) void {
-        self.inner.addEip7708TransferLog(from, to, amount);
-    }
+        /// EIP-7708: Emit a Transfer log (Amsterdam+). Caller must already have verified
+        /// that `from != to` and `amount > 0` and that the spec is Amsterdam or later.
+        pub fn emitTransferLog(self: *@This(), from: primitives.Address, to: primitives.Address, amount: primitives.U256) void {
+            self.inner.addEip7708TransferLog(from, to, amount);
+        }
 
-    /// EIP-7708: Sort and emit pending burn logs into the log list.
-    /// Call after coinbase payment and before takeLogs() in postExecution.
-    pub fn emitBurnLogs(self: *Journal) void {
-        self.inner.emitBurnLogs();
-    }
+        /// EIP-7708: Sort and emit pending burn logs into the log list.
+        /// Call after coinbase payment and before takeLogs() in postExecution.
+        pub fn emitBurnLogs(self: *@This()) void {
+            self.inner.emitBurnLogs();
+        }
 
-    pub fn commitTx(self: *Journal) void {
-        self.inner.commitTx();
-    }
+        pub fn commitTx(self: *@This()) void {
+            self.inner.commitTx();
+        }
 
-    pub fn discardTx(self: *Journal) void {
-        self.inner.discardTx();
-    }
+        pub fn discardTx(self: *@This()) void {
+            self.inner.discardTx();
+        }
 
-    /// Clear current journal resetting it to initial evm_state and return changes state.
-    pub fn finalize(self: *Journal) state.EvmState {
-        return self.inner.finalize();
-    }
+        /// Clear current journal resetting it to initial evm_state and return changes state.
+        pub fn finalize(self: *@This()) state.EvmState {
+            return self.inner.finalize();
+        }
 
-    pub fn sloadSkipColdLoad(self: *Journal, address: primitives.Address, key: primitives.StorageKey, skip_cold_load: bool) !StateLoad(primitives.StorageValue) {
-        return self.inner.sload(self.getDbMut(), address, key, skip_cold_load);
-    }
+        pub fn sloadSkipColdLoad(self: *@This(), address: primitives.Address, key: primitives.StorageKey, skip_cold_load: bool) !StateLoad(primitives.StorageValue) {
+            return self.inner.sload(self.getDbMut(), address, key, skip_cold_load);
+        }
 
-    pub fn sstoreSkipColdLoad(self: *Journal, address: primitives.Address, key: primitives.StorageKey, value: primitives.StorageValue, skip_cold_load: bool) !StateLoad(SStoreResult) {
-        return self.inner.sstore(self.getDbMut(), address, key, value, skip_cold_load);
-    }
+        pub fn sstoreSkipColdLoad(self: *@This(), address: primitives.Address, key: primitives.StorageKey, value: primitives.StorageValue, skip_cold_load: bool) !StateLoad(SStoreResult) {
+            return self.inner.sstore(self.getDbMut(), address, key, value, skip_cold_load);
+        }
 
-    /// Check whether an address is cold WITHOUT loading it from the database.
-    pub fn isAddressCold(self: *const Journal, address: primitives.Address) bool {
-        return self.inner.isAddressCold(address);
-    }
+        /// Check whether an address is cold WITHOUT loading it from the database.
+        pub fn isAddressCold(self: *const @This(), address: primitives.Address) bool {
+            return self.inner.isAddressCold(address);
+        }
 
-    /// Check whether a storage slot is cold WITHOUT loading it from the database.
-    pub fn isStorageCold(self: *const Journal, address: primitives.Address, key: primitives.StorageKey) bool {
-        return self.inner.isStorageCold(address, key);
-    }
+        /// Check whether a storage slot is cold WITHOUT loading it from the database.
+        pub fn isStorageCold(self: *const @This(), address: primitives.Address, key: primitives.StorageKey) bool {
+            return self.inner.isStorageCold(address, key);
+        }
 
-    /// Returns true if the address has been accessed (appears in the BAL).
-    pub fn isTrackedAddress(self: *const Journal, address: primitives.Address) bool {
-        return self.inner.isTrackedAddress(address);
-    }
+        /// Mark an address as an OOG phantom — loaded for gas calc but operation went OOG.
+        pub fn untrackAddress(self: *@This(), address: primitives.Address) void {
+            self.inner.untrackAddress(address);
+        }
 
-    /// Drain the accumulated Block Access Log for EIP-7928 validation.
-    pub fn takeAccessLog(self: *Journal) AccessLog {
-        return self.inner.takeAccessLog();
-    }
+        /// Force-add an address to the current-tx access log (EIP-7702 delegation targets).
+        pub fn forceTrackAddress(self: *@This(), address: primitives.Address) void {
+            self.inner.forceTrackAddress(address);
+        }
 
-    /// Returns true if the address has any non-zero storage in the DB.
-    /// Used by CREATE collision check; returns false for DB types without this method.
-    pub fn hasNonZeroStorageForAddress(self: *const Journal, addr: primitives.Address) bool {
-        return self.database.hasNonZeroStorageForAddress(addr);
-    }
+        /// Returns true if the address is legitimately tracked (not an OOG phantom).
+        pub fn isTrackedAddress(self: *const @This(), address: primitives.Address) bool {
+            return self.inner.isTrackedAddress(address);
+        }
 
-    /// Check whether an address is already in the EVM state cache (was loaded before
-    /// this call). Used to avoid un-tracking addresses that were legitimately accessed
-    /// earlier in the same transaction.
-    pub fn isAddressLoaded(self: *const Journal, address: primitives.Address) bool {
-        return self.inner.evm_state.contains(address);
-    }
+        /// Drain the accumulated Block Access Log for EIP-7928 validation.
+        pub fn takeAccessLog(self: *@This()) AccessLog {
+            return self.inner.takeAccessLog();
+        }
 
-    pub fn loadAccountInfoSkipColdLoad(self: *Journal, address: primitives.Address, load_code: bool, skip_cold_load: bool) !AccountInfoLoad {
-        const spec = self.inner.spec;
-        const account = try self.inner.loadAccountOptional(self.getDbMut(), address, load_code, skip_cold_load);
-        return AccountInfoLoad.new(@constCast(&account.data.info), account.is_cold, account.data.stateClearAwareIsEmpty(spec));
-    }
-};
+        /// Returns true if the address has any non-zero storage in the DB.
+        /// Used by CREATE collision check; returns false for DB types without this method.
+        pub fn hasNonZeroStorageForAddress(self: *const @This(), addr: primitives.Address) bool {
+            if (comptime @hasDecl(DB, "hasNonZeroStorageForAddress")) return self.getDb().hasNonZeroStorageForAddress(addr);
+            return false;
+        }
+
+        /// Check whether an address is already in the EVM state cache (was loaded before
+        /// this call). Used to avoid un-tracking addresses that were legitimately accessed
+        /// earlier in the same transaction.
+        pub fn isAddressLoaded(self: *const @This(), address: primitives.Address) bool {
+            return self.inner.evm_state.contains(address);
+        }
+
+        pub fn loadAccountInfoSkipColdLoad(self: *@This(), address: primitives.Address, load_code: bool, skip_cold_load: bool) !AccountInfoLoad {
+            const spec = self.inner.spec;
+            const account = try self.inner.loadAccountOptional(self.getDbMut(), address, load_code, skip_cold_load);
+            return AccountInfoLoad.new(@constCast(&account.data.info), account.is_cold, account.data.stateClearAwareIsEmpty(spec));
+        }
+    };
+}

@@ -16,14 +16,14 @@ const ExecuteEvm = mainnet_builder.ExecuteEvm;
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn makeEvmParts(db: *database.InMemoryDB, spec: primitives.SpecId) struct {
+fn makeEvmParts(db: database.InMemoryDB, spec: primitives.SpecId) struct {
     ctx: context.DefaultContext,
     instructions: handler_main.Instructions,
     precompiles: handler_main.Precompiles,
     frame_stack: handler_main.FrameStack,
 } {
     return .{
-        .ctx = context.DefaultContext.new(database.Database.forDb(database.InMemoryDB, db), spec),
+        .ctx = context.DefaultContext.new(db, spec),
         .instructions = handler_main.Instructions.new(spec),
         .precompiles = handler_main.Precompiles.new(spec),
         .frame_stack = handler_main.FrameStack.new(),
@@ -100,7 +100,7 @@ test "postExecution: caller reimbursed for unused gas, coinbase receives tip" {
     defer db.deinit();
     try insertCaller(&db, caller, initial_caller_balance);
 
-    var parts = makeEvmParts(&db, primitives.SpecId.london);
+    var parts = makeEvmParts(db, primitives.SpecId.london);
     var evm = handler_main.Evm.init(
         &parts.ctx,
         null,

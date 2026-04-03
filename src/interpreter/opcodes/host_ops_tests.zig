@@ -37,9 +37,12 @@ fn makeInterp() Interpreter {
     return interp;
 }
 
-/// Build a test context backed by the given database pointer.
-fn makeCtx(db: *database_mod.InMemoryDB) context_mod.DefaultContext {
-    return context_mod.DefaultContext.new(database_mod.Database.forDb(database_mod.InMemoryDB, db), .prague);
+/// Build a test context with the given pre-populated database.
+/// Note: InMemoryDB is copied by value into Context; both copies share the same
+/// underlying HashMap heap data, so insertions done to `db` before this call
+/// are visible in the returned context.
+fn makeCtx(db: database_mod.InMemoryDB) context_mod.DefaultContext {
+    return context_mod.DefaultContext.new(db, .prague);
 }
 
 // ---------------------------------------------------------------------------
@@ -53,7 +56,7 @@ test "SLOAD: slot present in state returns stored value" {
     var db = database_mod.InMemoryDB.init(ALLOC);
     try db.insertAccount(TARGET, state_mod.AccountInfo.default());
     try db.insertStorage(TARGET, KEY, VALUE);
-    var ctx = makeCtx(&db);
+    var ctx = makeCtx(db);
     // Pre-load account so journal sload can find it in evm_state
     _ = try ctx.journaled_state.loadAccount(TARGET);
 
@@ -72,7 +75,7 @@ test "SLOAD: slot present in state returns stored value" {
 test "SLOAD: slot absent returns zero" {
     var db = database_mod.InMemoryDB.init(ALLOC);
     try db.insertAccount(TARGET, state_mod.AccountInfo.default());
-    var ctx = makeCtx(&db);
+    var ctx = makeCtx(db);
     _ = try ctx.journaled_state.loadAccount(TARGET);
 
     var interp = makeInterp();
@@ -98,8 +101,8 @@ test "SLOAD: no host halts with invalid_opcode" {
 }
 
 test "SLOAD: stack underflow halts" {
-    var db = database_mod.InMemoryDB.init(ALLOC);
-    var ctx = makeCtx(&db);
+    const db = database_mod.InMemoryDB.init(ALLOC);
+    var ctx = makeCtx(db);
 
     var interp = makeInterp();
     var host = Host.fromCtx(&ctx, null);
@@ -116,7 +119,7 @@ test "SLOAD: cold access charges COLD_SLOAD gas (Berlin+)" {
 
     var db = database_mod.InMemoryDB.init(ALLOC);
     try db.insertAccount(TARGET, state_mod.AccountInfo.default());
-    var ctx = makeCtx(&db);
+    var ctx = makeCtx(db);
     _ = try ctx.journaled_state.loadAccount(TARGET);
 
     var interp = makeInterp();
@@ -139,7 +142,7 @@ test "SLOAD: second access to same slot charges WARM_SLOAD gas" {
     var db = database_mod.InMemoryDB.init(ALLOC);
     try db.insertAccount(TARGET, state_mod.AccountInfo.default());
     try db.insertStorage(TARGET, KEY, 0xFF);
-    var ctx = makeCtx(&db);
+    var ctx = makeCtx(db);
     _ = try ctx.journaled_state.loadAccount(TARGET);
 
     var interp = makeInterp();
@@ -169,7 +172,7 @@ test "SLOAD: out of gas halts with out_of_gas" {
 
     var db = database_mod.InMemoryDB.init(ALLOC);
     try db.insertAccount(TARGET, state_mod.AccountInfo.default());
-    var ctx = makeCtx(&db);
+    var ctx = makeCtx(db);
     _ = try ctx.journaled_state.loadAccount(TARGET);
 
     var interp = makeInterp();
@@ -195,7 +198,7 @@ test "SSTORE: writes value verifiable via sload" {
 
     var db = database_mod.InMemoryDB.init(ALLOC);
     try db.insertAccount(TARGET, state_mod.AccountInfo.default());
-    var ctx = makeCtx(&db);
+    var ctx = makeCtx(db);
     _ = try ctx.journaled_state.loadAccount(TARGET);
 
     var interp = makeInterp();
@@ -218,8 +221,8 @@ test "SSTORE: writes value verifiable via sload" {
 }
 
 test "SSTORE: static context halts with invalid_static" {
-    var db = database_mod.InMemoryDB.init(ALLOC);
-    var ctx = makeCtx(&db);
+    const db = database_mod.InMemoryDB.init(ALLOC);
+    var ctx = makeCtx(db);
 
     var interp = makeInterp();
     interp.runtime_flags.is_static = true;
@@ -246,8 +249,8 @@ test "SSTORE: no host halts with invalid_opcode" {
 }
 
 test "SSTORE: stack underflow halts" {
-    var db = database_mod.InMemoryDB.init(ALLOC);
-    var ctx = makeCtx(&db);
+    const db = database_mod.InMemoryDB.init(ALLOC);
+    var ctx = makeCtx(db);
 
     var interp = makeInterp();
     interp.stack.pushUnsafe(@as(U, 1)); // only 1 item, need 2
@@ -265,8 +268,8 @@ test "SSTORE: stack underflow halts" {
 // ---------------------------------------------------------------------------
 
 test "TSTORE then TLOAD round-trips a value" {
-    var db = database_mod.InMemoryDB.init(ALLOC);
-    var ctx = makeCtx(&db);
+    const db = database_mod.InMemoryDB.init(ALLOC);
+    var ctx = makeCtx(db);
 
     var interp = makeInterp();
     var host = Host.fromCtx(&ctx, null);
@@ -285,8 +288,8 @@ test "TSTORE then TLOAD round-trips a value" {
 }
 
 test "TLOAD: unset key returns zero" {
-    var db = database_mod.InMemoryDB.init(ALLOC);
-    var ctx = makeCtx(&db);
+    const db = database_mod.InMemoryDB.init(ALLOC);
+    var ctx = makeCtx(db);
 
     var interp = makeInterp();
     interp.stack.pushUnsafe(@as(U, 7)); // key not set
@@ -300,8 +303,8 @@ test "TLOAD: unset key returns zero" {
 }
 
 test "TSTORE: static context halts with invalid_static" {
-    var db = database_mod.InMemoryDB.init(ALLOC);
-    var ctx = makeCtx(&db);
+    const db = database_mod.InMemoryDB.init(ALLOC);
+    var ctx = makeCtx(db);
 
     var interp = makeInterp();
     interp.runtime_flags.is_static = true;
@@ -335,7 +338,7 @@ test "BALANCE: returns correct balance for known account" {
 
     var db = database_mod.InMemoryDB.init(ALLOC);
     try db.insertAccount(OTHER, state_mod.AccountInfo.new(BAL, 0, primitives.KECCAK_EMPTY, bytecode_mod.Bytecode.new()));
-    var ctx = makeCtx(&db);
+    var ctx = makeCtx(db);
 
     var interp = makeInterp();
     interp.stack.pushUnsafe(host_module.addressToU256(OTHER));
@@ -354,7 +357,7 @@ test "BALANCE: cold access charges COLD_ACCOUNT_ACCESS gas (Berlin+)" {
 
     var db = database_mod.InMemoryDB.init(ALLOC);
     try db.insertAccount(OTHER, state_mod.AccountInfo.new(1000, 0, primitives.KECCAK_EMPTY, bytecode_mod.Bytecode.new()));
-    var ctx = makeCtx(&db);
+    var ctx = makeCtx(db);
 
     var interp = makeInterp();
     interp.gas = Gas.new(GAS_LIMIT);
@@ -380,8 +383,8 @@ test "BALANCE: no host halts with invalid_opcode" {
 }
 
 test "BALANCE: stack underflow halts" {
-    var db = database_mod.InMemoryDB.init(ALLOC);
-    var ctx = makeCtx(&db);
+    const db = database_mod.InMemoryDB.init(ALLOC);
+    var ctx = makeCtx(db);
 
     var interp = makeInterp();
     var host = Host.fromCtx(&ctx, null);
@@ -401,7 +404,7 @@ test "SELFBALANCE: returns balance of executing contract" {
 
     var db = database_mod.InMemoryDB.init(ALLOC);
     try db.insertAccount(TARGET, state_mod.AccountInfo.new(BAL, 0, primitives.KECCAK_EMPTY, bytecode_mod.Bytecode.new()));
-    var ctx = makeCtx(&db);
+    var ctx = makeCtx(db);
 
     var interp = makeInterp(); // interp.input.target = TARGET
 
@@ -431,7 +434,7 @@ test "EXTCODESIZE: EOA with empty code returns 0" {
     // Bytecode.new() has original_len=1 (STOP padding); use newLegacy("") for truly empty code.
     var db = database_mod.InMemoryDB.init(ALLOC);
     try db.insertAccount(OTHER, state_mod.AccountInfo.new(0, 0, primitives.KECCAK_EMPTY, bytecode_mod.Bytecode.newLegacy(&[_]u8{})));
-    var ctx = makeCtx(&db);
+    var ctx = makeCtx(db);
 
     var interp = makeInterp();
     interp.stack.pushUnsafe(host_module.addressToU256(OTHER));
@@ -456,8 +459,8 @@ test "EXTCODESIZE: no host halts with invalid_opcode" {
 }
 
 test "EXTCODESIZE: stack underflow halts" {
-    var db = database_mod.InMemoryDB.init(ALLOC);
-    var ctx = makeCtx(&db);
+    const db = database_mod.InMemoryDB.init(ALLOC);
+    var ctx = makeCtx(db);
 
     var interp = makeInterp();
     var host = Host.fromCtx(&ctx, null);
@@ -473,8 +476,8 @@ test "EXTCODESIZE: stack underflow halts" {
 // ---------------------------------------------------------------------------
 
 test "EXTCODEHASH: empty account returns 0" {
-    var db = database_mod.InMemoryDB.init(ALLOC);
-    var ctx = makeCtx(&db); // OTHER not in DB → empty account
+    const db = database_mod.InMemoryDB.init(ALLOC);
+    var ctx = makeCtx(db); // OTHER not in DB → empty account
 
     var interp = makeInterp();
     interp.stack.pushUnsafe(host_module.addressToU256(OTHER));
@@ -508,7 +511,7 @@ test "BLOCKHASH: known block returns hash" {
 
     var db = database_mod.InMemoryDB.init(ALLOC);
     try db.insertBlockHash(BLOCK_NUM, HASH);
-    var ctx = makeCtx(&db);
+    var ctx = makeCtx(db);
     // Current block must be > BLOCK_NUM for the hash to be in the valid range
     ctx.block.number = BLOCK_NUM + 1;
 
@@ -525,8 +528,8 @@ test "BLOCKHASH: known block returns hash" {
 }
 
 test "BLOCKHASH: unknown block returns 0" {
-    var db = database_mod.InMemoryDB.init(ALLOC);
-    var ctx = makeCtx(&db);
+    const db = database_mod.InMemoryDB.init(ALLOC);
+    var ctx = makeCtx(db);
 
     var interp = makeInterp();
     interp.stack.pushUnsafe(@as(U, 999));
@@ -554,8 +557,8 @@ test "BLOCKHASH: no host halts with invalid_opcode" {
 // ---------------------------------------------------------------------------
 
 test "LOG0: emits log with correct address and empty data" {
-    var db = database_mod.InMemoryDB.init(ALLOC);
-    var ctx = makeCtx(&db);
+    const db = database_mod.InMemoryDB.init(ALLOC);
+    var ctx = makeCtx(db);
 
     var interp = makeInterp(); // input.target = TARGET
     // Stack: [offset (top), size]
@@ -581,8 +584,8 @@ test "LOG1: emits log with one topic" {
     const TOPIC_HASH: primitives.Hash = [_]u8{0x55} ** 32;
     const TOPIC_VAL: U = host_module.hashToU256(TOPIC_HASH);
 
-    var db = database_mod.InMemoryDB.init(ALLOC);
-    var ctx = makeCtx(&db);
+    const db = database_mod.InMemoryDB.init(ALLOC);
+    var ctx = makeCtx(db);
 
     var interp = makeInterp();
     // Stack for LOG1: [offset (top), size, topic0]
@@ -605,8 +608,8 @@ test "LOG1: emits log with one topic" {
 }
 
 test "LOG0: static context halts with invalid_static" {
-    var db = database_mod.InMemoryDB.init(ALLOC);
-    var ctx = makeCtx(&db);
+    const db = database_mod.InMemoryDB.init(ALLOC);
+    var ctx = makeCtx(db);
 
     var interp = makeInterp();
     interp.runtime_flags.is_static = true;
@@ -622,8 +625,8 @@ test "LOG0: static context halts with invalid_static" {
 }
 
 test "LOG4: emits log with four topics" {
-    var db = database_mod.InMemoryDB.init(ALLOC);
-    var ctx = makeCtx(&db);
+    const db = database_mod.InMemoryDB.init(ALLOC);
+    var ctx = makeCtx(db);
 
     var interp = makeInterp();
     // Stack for LOG4: [offset (top), size, t0, t1, t2, t3]
@@ -665,7 +668,7 @@ test "SELFDESTRUCT: halts with selfdestruct result" {
     var db = database_mod.InMemoryDB.init(ALLOC);
     try db.insertAccount(TARGET, state_mod.AccountInfo.default());
     try db.insertAccount(OTHER, state_mod.AccountInfo.default());
-    var ctx = makeCtx(&db);
+    var ctx = makeCtx(db);
     _ = try ctx.journaled_state.loadAccount(TARGET);
 
     var interp = makeInterp();
@@ -680,8 +683,8 @@ test "SELFDESTRUCT: halts with selfdestruct result" {
 }
 
 test "SELFDESTRUCT: static context halts with invalid_static" {
-    var db = database_mod.InMemoryDB.init(ALLOC);
-    var ctx = makeCtx(&db);
+    const db = database_mod.InMemoryDB.init(ALLOC);
+    var ctx = makeCtx(db);
 
     var interp = makeInterp();
     interp.runtime_flags.is_static = true;
@@ -706,8 +709,8 @@ test "SELFDESTRUCT: no host halts with invalid_opcode" {
 }
 
 test "SELFDESTRUCT: stack underflow halts" {
-    var db = database_mod.InMemoryDB.init(ALLOC);
-    var ctx = makeCtx(&db);
+    const db = database_mod.InMemoryDB.init(ALLOC);
+    var ctx = makeCtx(db);
 
     var interp = makeInterp();
     var host = Host.fromCtx(&ctx, null);

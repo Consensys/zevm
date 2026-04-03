@@ -114,6 +114,8 @@ pub const JournalVTable = struct {
     // Simple entries — operate on the type-erased journal pointer directly.
     isAddressCold: *const fn (*anyopaque, primitives.Address) bool,
     isStorageCold: *const fn (*anyopaque, primitives.Address, primitives.StorageKey) bool,
+    untrackAddress: *const fn (*anyopaque, primitives.Address) void,
+    forceTrackAddress: *const fn (*anyopaque, primitives.Address) void,
     isAddressLoaded: *const fn (*anyopaque, primitives.Address) bool,
     accountInfo: *const fn (*anyopaque, primitives.Address) anyerror!context_mod.AccountInfoLoad,
     loadAccountWithCode: *const fn (*anyopaque, primitives.Address) anyerror!context_mod.StateLoad(*const state_mod.Account),
@@ -131,12 +133,14 @@ pub const JournalVTable = struct {
     setupCreate: *const fn (*Host, primitives.Address, primitives.U256, []const u8, u64, bool, primitives.U256, bool, usize, bool) Host.CreateSetupResult,
     finalizeCreate: *const fn (*Host, JournalCheckpoint, primitives.Address, InstructionResult, u64, i64, []const u8, primitives.SpecId, bool, u64) CreateResult,
 
-    /// Return the single comptime-constant vtable for the concrete Journal type.
-    pub fn get() *const JournalVTable {
+    /// Return a comptime-constant vtable for the given DB type.
+    pub fn forDb(comptime DB: type) *const JournalVTable {
         const Impl = struct {
             const vtable: JournalVTable = .{
                 .isAddressCold = isAddressColdFn,
                 .isStorageCold = isStorageColdFn,
+                .untrackAddress = untrackAddressFn,
+                .forceTrackAddress = forceTrackAddressFn,
                 .isAddressLoaded = isAddressLoadedFn,
                 .accountInfo = accountInfoFn,
                 .loadAccountWithCode = loadAccountWithCodeFn,
@@ -153,7 +157,7 @@ pub const JournalVTable = struct {
                 .finalizeCreate = finalizeCreateFn,
             };
 
-            fn j(ptr: *anyopaque) *context_mod.Journal {
+            fn j(ptr: *anyopaque) *context_mod.Journal(DB) {
                 return @ptrCast(@alignCast(ptr));
             }
 
@@ -162,6 +166,12 @@ pub const JournalVTable = struct {
             }
             fn isStorageColdFn(ptr: *anyopaque, addr: primitives.Address, key: primitives.StorageKey) bool {
                 return j(ptr).isStorageCold(addr, key);
+            }
+            fn untrackAddressFn(ptr: *anyopaque, addr: primitives.Address) void {
+                j(ptr).untrackAddress(addr);
+            }
+            fn forceTrackAddressFn(ptr: *anyopaque, addr: primitives.Address) void {
+                j(ptr).forceTrackAddress(addr);
             }
             fn isAddressLoadedFn(ptr: *anyopaque, addr: primitives.Address) bool {
                 return j(ptr).isAddressLoaded(addr);
@@ -222,28 +232,28 @@ pub const Host = struct {
     tx: *context_mod.TxEnv,
     cfg: *const context_mod.CfgEnv,
     ctx_error: *context_mod.ContextError,
-    /// Type-erased *Journal. Cast via vtable implementations.
+    /// Type-erased *Journal(DB). Cast via vtable implementations.
     js: *anyopaque,
     js_vtable: *const JournalVTable,
     /// Precompile set for the current spec. Null disables precompile dispatch (benchmarks/unit tests).
     precompiles: ?*const precompile_mod.Precompiles = null,
 
-    /// Create a Host from a Context.
-    pub fn init(ctx: *context_mod.Context, prec: ?*const precompile_mod.Precompiles) Host {
+    /// Create a Host from any Context(DB). DB is resolved at comptime.
+    pub fn init(comptime DB: type, ctx: *context_mod.Context(DB), prec: ?*const precompile_mod.Precompiles) Host {
         return .{
             .block = &ctx.block,
             .tx = &ctx.tx,
             .cfg = &ctx.cfg,
             .ctx_error = &ctx.ctx_error,
             .js = &ctx.journaled_state,
-            .js_vtable = JournalVTable.get(),
+            .js_vtable = JournalVTable.forDb(DB),
             .precompiles = prec,
         };
     }
 
-    /// Convenience constructor — same as init() since Context is now a single concrete type.
+    /// Convenience constructor for the default InMemoryDB context.
     pub fn fromCtx(ctx: *context_mod.DefaultContext, prec: ?*const precompile_mod.Precompiles) Host {
-        return init(ctx, prec);
+        return init(database_mod.InMemoryDB, ctx, prec);
     }
 
     // -----------------------------------------------------------------------
@@ -333,6 +343,16 @@ pub const Host = struct {
     /// Check whether a storage slot is cold WITHOUT loading it from the database.
     pub fn isStorageCold(self: *Host, addr: primitives.Address, key: primitives.StorageKey) bool {
         return self.js_vtable.isStorageCold(self.js, addr, key);
+    }
+
+    /// Un-record a pending address access in the database fallback.
+    pub fn untrackAddress(self: *Host, addr: primitives.Address) void {
+        self.js_vtable.untrackAddress(self.js, addr);
+    }
+
+    /// Force-add an address to the current-tx access log in the database fallback.
+    pub fn forceTrackAddress(self: *Host, addr: primitives.Address) void {
+        self.js_vtable.forceTrackAddress(self.js, addr);
     }
 
     /// Check whether an address is already in the EVM state cache.
@@ -760,21 +780,27 @@ fn setupCreateCore(
         break :blk create2Address(caller, salt, init_hash);
     } else createAddress(caller, caller_nonce);
 
-    // Balance check BEFORE loading new_addr to avoid phantom BAL entries.
-    // Pre-Amsterdam already checked balance before the nonce bump (line above); this handles
-    // Amsterdam (checked after nonce bump) without needing an untrackAddress on failure.
-    if (primitives.isEnabledIn(spec_id, .amsterdam) and value > 0) {
-        const ca = js.inner.evm_state.getPtr(caller) orelse {
-            if (is_opcode_create) js.checkpointRevert(pre_bump_checkpoint);
+    _ = js.loadAccount(new_addr) catch return .{ .failed = CreateResult.preExecFailure(gas_limit) };
+    const new_addr_was_nonexistent = if (js.inner.evm_state.get(new_addr)) |na|
+        na.status.loaded_as_not_existing
+    else
+        true;
+
+    // Balance check.
+    if (value > 0) {
+        const caller_acct = js.inner.evm_state.getPtr(caller) orelse {
+            if (is_opcode_create and primitives.isEnabledIn(spec_id, .amsterdam))
+                js.checkpointRevert(pre_bump_checkpoint);
+            if (new_addr_was_nonexistent) js.untrackAddress(new_addr);
             return .{ .failed = CreateResult.preExecFailure(gas_limit) };
         };
-        if (ca.info.balance < value) {
-            if (is_opcode_create) js.checkpointRevert(pre_bump_checkpoint);
+        if (caller_acct.info.balance < value) {
+            if (is_opcode_create and primitives.isEnabledIn(spec_id, .amsterdam))
+                js.checkpointRevert(pre_bump_checkpoint);
+            if (new_addr_was_nonexistent) js.untrackAddress(new_addr);
             return .{ .failed = CreateResult.preExecFailure(gas_limit) };
         }
     }
-
-    _ = js.loadAccount(new_addr) catch return .{ .failed = CreateResult.preExecFailure(gas_limit) };
 
     // Address collision: storage already exists at the target address.
     if (js.inner.evm_state.get(new_addr)) |acct| {

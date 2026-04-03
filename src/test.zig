@@ -174,8 +174,8 @@ fn testContext() !void {
     std.debug.assert(cfg.spec == zevm.primitives.SpecId.prague);
 
     // Test context creation
-    var db_ctx = zevm.database.InMemoryDB.init(std.heap.c_allocator);
-    const ctx = zevm.context.DefaultContext.new(zevm.database.Database.forDb(zevm.database.InMemoryDB, &db_ctx), zevm.primitives.SpecId.prague);
+    const db = zevm.database.InMemoryDB.init(std.heap.c_allocator);
+    const ctx = zevm.context.DefaultContext.new(db, zevm.primitives.SpecId.prague);
     std.debug.assert(ctx.cfg.spec == zevm.primitives.SpecId.prague);
 
     std.log.info("✓ Context tests passed", .{});
@@ -354,8 +354,8 @@ fn testInspector() !void {
 
 fn testIntegration() !void {
     // Test basic EVM execution flow
-    var db_int = zevm.database.InMemoryDB.init(std.heap.c_allocator);
-    var ctx = zevm.context.DefaultContext.new(zevm.database.Database.forDb(zevm.database.InMemoryDB, &db_int), zevm.primitives.SpecId.prague);
+    const db = zevm.database.InMemoryDB.init(std.heap.c_allocator);
+    var ctx = zevm.context.DefaultContext.new(db, zevm.primitives.SpecId.prague);
 
     // Create a simple bytecode (STOP instruction)
     const bytecode_data = [_]u8{0x00}; // STOP
