@@ -680,7 +680,6 @@ fn setupCallCore(js: anytype, host: *Host, inputs: CallInputs, frame_depth: usiz
 
     // 4. Checkpoint
     const checkpoint = js.getCheckpoint();
-    js.snapshotFrame();
 
     // 5. Value transfer
     if (inputs.value > 0 and inputs.scheme != .delegatecall) {
@@ -709,10 +708,8 @@ fn setupCallCore(js: anytype, host: *Host, inputs: CallInputs, frame_depth: usiz
 fn finalizeCallCore(js: anytype, checkpoint: JournalCheckpoint, result: InstructionResult, gas_limit: u64, gas_remaining: u64, gas_refunded: i64, return_data: []const u8) CallResult {
     if (result.isSuccess()) {
         js.checkpointCommit();
-        js.commitFrame();
     } else {
         js.checkpointRevert(checkpoint);
-        js.revertFrame();
     }
     const gas_rem: u64 = if (result.isSuccess() or result == .revert) gas_remaining else 0;
     const gas_used = if (gas_limit > gas_rem) gas_limit - gas_rem else 0;
@@ -828,7 +825,6 @@ fn setupCreateCore(
     const checkpoint = js.createAccountCheckpoint(caller, new_addr, value, spec_id) catch {
         return .{ .failed = CreateResult.failure() };
     };
-    js.snapshotFrame();
 
     // EIP-7708 (Amsterdam+): emit Transfer log for ETH sent to the new contract.
     if (value > 0 and primitives.isEnabledIn(spec_id, .amsterdam)) {
@@ -856,7 +852,6 @@ fn finalizeCreateCore(
 
     if (!result.isSuccess()) {
         js.checkpointRevert(checkpoint);
-        js.revertFrame();
         const gas_rem = if (result == .revert) gas_remaining else @as(u64, 0);
         const rd = if (result == .revert) return_data else &[_]u8{};
         return .{ .success = false, .is_revert = (result == .revert), .address = [_]u8{0} ** 20, .gas_remaining = gas_rem, .return_data = rd, .gas_refunded = 0, .state_gas_used = 0, .state_gas_remaining = gas_reservoir };
@@ -865,13 +860,11 @@ fn finalizeCreateCore(
     const deployed_raw = return_data;
     if (deployed_raw.len > MAX_CODE_SIZE) {
         js.checkpointRevert(checkpoint);
-        js.revertFrame();
         return .{ .success = false, .is_revert = false, .address = [_]u8{0} ** 20, .gas_remaining = 0, .return_data = &[_]u8{}, .gas_refunded = 0, .state_gas_used = 0, .state_gas_remaining = gas_reservoir };
     }
     if (primitives.isEnabledIn(spec_id, .london)) {
         if (deployed_raw.len > 0 and deployed_raw[0] == 0xEF) {
             js.checkpointRevert(checkpoint);
-            js.revertFrame();
             return .{ .success = false, .is_revert = false, .address = [_]u8{0} ** 20, .gas_remaining = 0, .return_data = &[_]u8{}, .gas_refunded = 0, .state_gas_used = 0, .state_gas_remaining = gas_reservoir };
         }
     }
@@ -884,7 +877,6 @@ fn finalizeCreateCore(
         const regular_deposit = gas_costs.G_KECCAK256WORD * @as(u64, code_words);
         if (gas_remaining < regular_deposit) {
             js.checkpointRevert(checkpoint);
-            js.revertFrame();
             return .{ .success = false, .is_revert = false, .address = [_]u8{0} ** 20, .gas_remaining = 0, .return_data = &[_]u8{}, .gas_refunded = 0, .state_gas_used = 0, .state_gas_remaining = remaining_reservoir };
         }
         var gas_after_regular = gas_remaining - regular_deposit;
@@ -899,7 +891,6 @@ fn finalizeCreateCore(
                 gas_after_regular -= spill;
             } else {
                 js.checkpointRevert(checkpoint);
-                js.revertFrame();
                 return .{ .success = false, .is_revert = false, .address = [_]u8{0} ** 20, .gas_remaining = 0, .return_data = &[_]u8{}, .gas_refunded = 0, .state_gas_used = 0, .state_gas_remaining = remaining_reservoir };
             }
         }
@@ -910,11 +901,9 @@ fn finalizeCreateCore(
         if (gas_remaining < deposit_cost) {
             if (primitives.isEnabledIn(spec_id, .homestead)) {
                 js.checkpointRevert(checkpoint);
-                js.revertFrame();
                 return CreateResult.failure();
             } else {
                 js.checkpointCommit();
-                js.commitFrame();
                 return .{ .success = true, .is_revert = false, .address = new_addr, .gas_remaining = gas_remaining, .return_data = &[_]u8{}, .gas_refunded = gas_refunded, .state_gas_used = 0, .state_gas_remaining = 0 };
             }
         }
@@ -924,7 +913,6 @@ fn finalizeCreateCore(
     if (deployed_raw.len > 0) {
         const deployed_copy = alloc_mod.get().dupe(u8, deployed_raw) catch {
             js.checkpointRevert(checkpoint);
-            js.revertFrame();
             return CreateResult.failure();
         };
         var code_hash: [32]u8 = undefined;
@@ -934,7 +922,6 @@ fn finalizeCreateCore(
     }
 
     js.checkpointCommit();
-    js.commitFrame();
     return .{ .success = true, .is_revert = false, .address = new_addr, .gas_remaining = gas_after_deposit, .return_data = &[_]u8{}, .gas_refunded = gas_refunded, .state_gas_used = code_deposit_state_gas, .state_gas_remaining = remaining_reservoir };
 }
 
