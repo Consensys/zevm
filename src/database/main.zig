@@ -212,11 +212,20 @@ const StorageKeyContext = struct {
 };
 
 /// In-memory database implementation.
+///
+/// Pre-populate with `insertAccount`, `insertCode`, `insertStorage`, `insertBlockHash`
+/// before execution. Any DB type satisfying the 4-method interface (basic, codeByHash,
+/// storage, blockHash) can be used in place of this via `Context(DB)`. Tracking methods
+/// (snapshotFrame, commitFrame, etc.) are opt-in: implement them on your DB type and
+/// they will be activated automatically via @hasDecl in the Journal wrappers.
 pub const InMemoryDB = struct {
     accounts: std.AutoHashMap(primitives.Address, state.AccountInfo),
     code: std.AutoHashMap(primitives.Hash, bytecode.Bytecode),
     storage_map: std.HashMap(struct { primitives.Address, primitives.StorageKey }, primitives.StorageValue, StorageKeyContext, std.hash_map.default_max_load_percentage),
     block_hashes: std.AutoHashMap(u64, primitives.Hash),
+    /// Count of non-zero storage entries per address.
+    /// Maintained by putStorage for O(1) hasNonZeroStorageForAddress lookups.
+    nonzero_storage_count: std.AutoHashMap(primitives.Address, u32),
 
     const Self = @This();
 
@@ -226,6 +235,7 @@ pub const InMemoryDB = struct {
             .code = std.AutoHashMap(primitives.Hash, bytecode.Bytecode).init(allocator),
             .storage_map = std.HashMap(struct { primitives.Address, primitives.StorageKey }, primitives.StorageValue, StorageKeyContext, std.hash_map.default_max_load_percentage).init(allocator),
             .block_hashes = std.AutoHashMap(u64, primitives.Hash).init(allocator),
+            .nonzero_storage_count = std.AutoHashMap(primitives.Address, u32).init(allocator),
         };
     }
 
@@ -234,6 +244,23 @@ pub const InMemoryDB = struct {
         self.code.deinit();
         self.storage_map.deinit();
         self.block_hashes.deinit();
+        self.nonzero_storage_count.deinit();
+    }
+
+    /// Insert or update a storage slot, maintaining the nonzero_storage_count index.
+    fn putStorage(self: *Self, address: primitives.Address, key: primitives.StorageKey, value: primitives.StorageValue) !void {
+        const old_value = self.storage_map.get(.{ address, key }) orelse 0;
+        try self.storage_map.put(.{ address, key }, value);
+        if (old_value == 0 and value != 0) {
+            const entry = try self.nonzero_storage_count.getOrPut(address);
+            if (!entry.found_existing) entry.value_ptr.* = 0;
+            entry.value_ptr.* += 1;
+        } else if (old_value != 0 and value == 0) {
+            if (self.nonzero_storage_count.getPtr(address)) |count| {
+                count.* -= 1;
+                if (count.* == 0) _ = self.nonzero_storage_count.remove(address);
+            }
+        }
     }
 
     pub fn basic(self: *Self, address: primitives.Address) !?state.AccountInfo {
@@ -254,6 +281,12 @@ pub const InMemoryDB = struct {
 
     pub fn blockHash(self: *Self, number: u64) !primitives.Hash {
         return self.block_hashes.get(number) orelse [_]u8{0} ** 32;
+    }
+
+    /// Returns true if the address has any non-zero storage entry (O(1)).
+    pub fn hasNonZeroStorageForAddress(self: *const Self, address: primitives.Address) bool {
+        const count = self.nonzero_storage_count.get(address) orelse return false;
+        return count > 0;
     }
 
     pub fn basicRef(self: Self, address: primitives.Address) !?state.AccountInfo {
@@ -286,7 +319,7 @@ pub const InMemoryDB = struct {
             while (storage_iterator.next()) |storage_entry| {
                 const key = storage_entry.key_ptr.*;
                 const slot = storage_entry.value_ptr.*;
-                self.storage_map.put(.{ address, key }, slot.presentValue()) catch return;
+                self.putStorage(address, key, slot.presentValue()) catch return;
             }
         }
     }
@@ -303,7 +336,7 @@ pub const InMemoryDB = struct {
 
     /// Insert storage value into the database
     pub fn insertStorage(self: *Self, address: primitives.Address, key: primitives.StorageKey, value: primitives.StorageValue) !void {
-        try self.storage_map.put(.{ address, key }, value);
+        try self.putStorage(address, key, value);
     }
 
     /// Insert block hash into the database

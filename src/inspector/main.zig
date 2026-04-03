@@ -95,7 +95,7 @@ pub const Inspector = struct {
     /// Called before the interpreter is initialized.
     ///
     /// If interp.bytecode.set_action is set the execution of the interpreter is skipped.
-    pub fn initializeInterp(self: *Inspector, interp: *interpreter.Interpreter, ctx: *context.Context) void {
+    pub fn initializeInterp(self: *Inspector, interp: *interpreter.Interpreter, ctx: *context.DefaultContext) void {
         _ = self;
         _ = interp;
         _ = ctx;
@@ -109,7 +109,7 @@ pub const Inspector = struct {
     /// # Example
     ///
     /// To get the current opcode, use interp.bytecode.opcode().
-    pub fn step(self: *Inspector, interp: *interpreter.Interpreter, ctx: *context.Context) void {
+    pub fn step(self: *Inspector, interp: *interpreter.Interpreter, ctx: *context.DefaultContext) void {
         _ = self;
         _ = interp;
         _ = ctx;
@@ -118,14 +118,14 @@ pub const Inspector = struct {
     /// Called after step when the instruction has been executed.
     ///
     /// Setting interp.bytecode.set_action will result in stopping the execution of the interpreter.
-    pub fn stepEnd(self: *Inspector, interp: *interpreter.Interpreter, ctx: *context.Context) void {
+    pub fn stepEnd(self: *Inspector, interp: *interpreter.Interpreter, ctx: *context.DefaultContext) void {
         _ = self;
         _ = interp;
         _ = ctx;
     }
 
     /// Called when a log is emitted.
-    pub fn log(self: *Inspector, interp: *interpreter.Interpreter, ctx: *context.Context, log_data: primitives.Log) void {
+    pub fn log(self: *Inspector, interp: *interpreter.Interpreter, ctx: *context.DefaultContext, log_data: primitives.Log) void {
         _ = self;
         _ = interp;
         _ = ctx;
@@ -135,7 +135,7 @@ pub const Inspector = struct {
     /// Called whenever a call to a contract is about to start.
     ///
     /// If Some is returned, the call is skipped and the returned value is used instead.
-    pub fn call(self: *Inspector, ctx: *context.Context, inputs: *CallInputs) ?CallOutcome {
+    pub fn call(self: *Inspector, ctx: *context.DefaultContext, inputs: *CallInputs) ?CallOutcome {
         _ = self;
         _ = ctx;
         _ = inputs;
@@ -143,7 +143,7 @@ pub const Inspector = struct {
     }
 
     /// Called after a call has been executed.
-    pub fn callEnd(self: *Inspector, ctx: *context.Context, inputs: *CallInputs, outcome: *CallOutcome) void {
+    pub fn callEnd(self: *Inspector, ctx: *context.DefaultContext, inputs: *CallInputs, outcome: *CallOutcome) void {
         _ = self;
         _ = ctx;
         _ = inputs;
@@ -153,7 +153,7 @@ pub const Inspector = struct {
     /// Called whenever a contract creation is about to start.
     ///
     /// If Some is returned, the creation is skipped and the returned value is used instead.
-    pub fn create(self: *Inspector, ctx: *context.Context, inputs: *CreateInputs) ?CreateOutcome {
+    pub fn create(self: *Inspector, ctx: *context.DefaultContext, inputs: *CreateInputs) ?CreateOutcome {
         _ = self;
         _ = ctx;
         _ = inputs;
@@ -161,7 +161,7 @@ pub const Inspector = struct {
     }
 
     /// Called after a contract creation has been executed.
-    pub fn createEnd(self: *Inspector, ctx: *context.Context, inputs: *CreateInputs, outcome: *CreateOutcome) void {
+    pub fn createEnd(self: *Inspector, ctx: *context.DefaultContext, inputs: *CreateInputs, outcome: *CreateOutcome) void {
         _ = self;
         _ = ctx;
         _ = inputs;
@@ -286,22 +286,22 @@ pub const CountInspector = struct {
         return self.selfdestruct_count;
     }
 
-    pub fn step(self: *CountInspector, interp: *interpreter.Interpreter, ctx: *context.Context) void {
+    pub fn step(self: *CountInspector, interp: *interpreter.Interpreter, ctx: *context.DefaultContext) void {
         self.step_count += 1;
         self.inspector.step(interp, ctx);
     }
 
-    pub fn call(self: *CountInspector, ctx: *context.Context, inputs: *CallInputs) ?CallOutcome {
+    pub fn call(self: *CountInspector, ctx: *context.DefaultContext, inputs: *CallInputs) ?CallOutcome {
         self.call_count += 1;
         return self.inspector.call(ctx, inputs);
     }
 
-    pub fn create(self: *CountInspector, ctx: *context.Context, inputs: *CreateInputs) ?CreateOutcome {
+    pub fn create(self: *CountInspector, ctx: *context.DefaultContext, inputs: *CreateInputs) ?CreateOutcome {
         self.create_count += 1;
         return self.inspector.create(ctx, inputs);
     }
 
-    pub fn log(self: *CountInspector, interp: *interpreter.Interpreter, ctx: *context.Context, log_data: primitives.Log) void {
+    pub fn log(self: *CountInspector, interp: *interpreter.Interpreter, ctx: *context.DefaultContext, log_data: primitives.Log) void {
         self.log_count += 1;
         self.inspector.log(interp, ctx, log_data);
     }
@@ -322,51 +322,51 @@ pub const InspectorHandler = struct {
         };
     }
 
-    pub fn initializeInterp(self: *InspectorHandler, interp: *interpreter.Interpreter, ctx: *context.Context) void {
+    pub fn initializeInterp(self: *InspectorHandler, interp: *interpreter.Interpreter, ctx: *context.DefaultContext) void {
         if (self.inspector) |inspector| {
             inspector.initializeInterp(interp, ctx);
         }
     }
 
-    pub fn step(self: *InspectorHandler, interp: *interpreter.Interpreter, ctx: *context.Context) void {
+    pub fn step(self: *InspectorHandler, interp: *interpreter.Interpreter, ctx: *context.DefaultContext) void {
         if (self.inspector) |inspector| {
             inspector.step(interp, ctx);
         }
     }
 
-    pub fn stepEnd(self: *InspectorHandler, interp: *interpreter.Interpreter, ctx: *context.Context) void {
+    pub fn stepEnd(self: *InspectorHandler, interp: *interpreter.Interpreter, ctx: *context.DefaultContext) void {
         if (self.inspector) |inspector| {
             inspector.stepEnd(interp, ctx);
         }
     }
 
-    pub fn log(self: *InspectorHandler, interp: *interpreter.Interpreter, ctx: *context.Context, log_data: primitives.Log) void {
+    pub fn log(self: *InspectorHandler, interp: *interpreter.Interpreter, ctx: *context.DefaultContext, log_data: primitives.Log) void {
         if (self.inspector) |inspector| {
             inspector.log(interp, ctx, log_data);
         }
     }
 
-    pub fn call(self: *InspectorHandler, ctx: *context.Context, inputs: *CallInputs) ?CallOutcome {
+    pub fn call(self: *InspectorHandler, ctx: *context.DefaultContext, inputs: *CallInputs) ?CallOutcome {
         if (self.inspector) |inspector| {
             return inspector.call(ctx, inputs);
         }
         return null;
     }
 
-    pub fn callEnd(self: *InspectorHandler, ctx: *context.Context, inputs: *CallInputs, outcome: *CallOutcome) void {
+    pub fn callEnd(self: *InspectorHandler, ctx: *context.DefaultContext, inputs: *CallInputs, outcome: *CallOutcome) void {
         if (self.inspector) |inspector| {
             inspector.callEnd(ctx, inputs, outcome);
         }
     }
 
-    pub fn create(self: *InspectorHandler, ctx: *context.Context, inputs: *CreateInputs) ?CreateOutcome {
+    pub fn create(self: *InspectorHandler, ctx: *context.DefaultContext, inputs: *CreateInputs) ?CreateOutcome {
         if (self.inspector) |inspector| {
             return inspector.create(ctx, inputs);
         }
         return null;
     }
 
-    pub fn createEnd(self: *InspectorHandler, ctx: *context.Context, inputs: *CreateInputs, outcome: *CreateOutcome) void {
+    pub fn createEnd(self: *InspectorHandler, ctx: *context.DefaultContext, inputs: *CreateInputs, outcome: *CreateOutcome) void {
         if (self.inspector) |inspector| {
             inspector.createEnd(ctx, inputs, outcome);
         }
@@ -454,7 +454,7 @@ pub const testing = struct {
             100000,
         );
         defer interp.deinit();
-        var ctx = context.Context.new(database.InMemoryDB.init(std.heap.c_allocator), primitives.SpecId.prague);
+        var ctx = context.DefaultContext.new(database.InMemoryDB.init(std.heap.c_allocator), primitives.SpecId.prague);
 
         count_inspector.step(&interp, &ctx);
         std.debug.assert(count_inspector.getStepCount() == 1);
