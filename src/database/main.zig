@@ -226,12 +226,6 @@ pub const InMemoryDB = struct {
     /// Count of non-zero storage entries per address.
     /// Maintained by putStorage for O(1) hasNonZeroStorageForAddress lookups.
     nonzero_storage_count: std.AutoHashMap(primitives.Address, u32),
-    /// Optional fallback: called on cache miss for account/storage/code/blockHash.
-    fallback: ?FallbackFns = null,
-    /// Addresses that were explicitly OOG-untracked via untrackAddress().
-    /// Used by BaTracker.computeHash() to exclude CALL gas-calc phantoms from the BAL.
-    /// Populated by untrackAddress(); never cleared between transactions (block-scoped).
-    oog_addresses: std.AutoHashMap(primitives.Address, void),
 
     const Self = @This();
 
@@ -242,7 +236,6 @@ pub const InMemoryDB = struct {
             .storage_map = std.HashMap(struct { primitives.Address, primitives.StorageKey }, primitives.StorageValue, StorageKeyContext, std.hash_map.default_max_load_percentage).init(allocator),
             .block_hashes = std.AutoHashMap(u64, primitives.Hash).init(allocator),
             .nonzero_storage_count = std.AutoHashMap(primitives.Address, u32).init(allocator),
-            .oog_addresses = std.AutoHashMap(primitives.Address, void).init(allocator),
         };
     }
 
@@ -252,7 +245,6 @@ pub const InMemoryDB = struct {
         self.storage_map.deinit();
         self.block_hashes.deinit();
         self.nonzero_storage_count.deinit();
-        self.oog_addresses.deinit();
     }
 
     /// Insert or update a storage slot, maintaining the nonzero_storage_count index.
@@ -291,80 +283,10 @@ pub const InMemoryDB = struct {
         return self.block_hashes.get(number) orelse [_]u8{0} ** 32;
     }
 
-    /// Notify the fallback that a transaction committed successfully.
-    /// No-op if no fallback or fallback has no commit_tx callback.
-    pub fn commitTracking(self: *Self) void {
-        if (self.fallback) |fb| if (fb.commit_tx) |f| f(fb.ctx);
-    }
-
-    /// Notify the fallback that a transaction was discarded (reverted / invalid).
-    /// No-op if no fallback or fallback has no discard_tx callback.
-    pub fn discardTracking(self: *Self) void {
-        if (self.fallback) |fb| if (fb.discard_tx) |f| f(fb.ctx);
-    }
-
-    /// Notify the fallback that a new execution frame opened a journal checkpoint.
-    pub fn snapshotFrame(self: *Self) void {
-        if (self.fallback) |fb| if (fb.snapshot_frame) |f| f(fb.ctx);
-    }
-
-    /// Notify the fallback that the current execution frame committed successfully.
-    pub fn commitFrame(self: *Self) void {
-        if (self.fallback) |fb| if (fb.commit_frame) |f| f(fb.ctx);
-    }
-
-    /// Notify the fallback that the current execution frame was reverted.
-    pub fn revertFrame(self: *Self) void {
-        if (self.fallback) |fb| if (fb.revert_frame) |f| f(fb.ctx);
-    }
-
-    /// Un-record a pending address access.
-    /// Called when a CALL loaded an address for gas calculation but then went OOG.
-    /// Marks the address as an OOG phantom so BaTracker can exclude it from the BAL.
-    pub fn untrackAddress(self: *Self, address: primitives.Address) void {
-        self.oog_addresses.put(address, {}) catch {};
-        if (self.fallback) |fb| if (fb.untrack_address) |f| f(fb.ctx, address);
-    }
-
-    /// Returns true if the address was OOG-untracked (loaded only for CALL gas calculation).
-    /// Used by BaTracker.computeHash() to exclude phantom accounts from the BAL.
-    pub fn isOogAddress(self: *const Self, address: primitives.Address) bool {
-        return self.oog_addresses.contains(address);
-    }
-
-    /// Force-add an address to the current-tx access log regardless of witness state.
-    /// Called for EIP-7702 delegation targets that execute but are not in the witness.
-    pub fn forceTrackAddress(self: *Self, address: primitives.Address) void {
-        if (self.fallback) |fb| if (fb.force_track_address) |f| f(fb.ctx, address);
-    }
-
-    /// Notify the fallback about a storage slot being committed with a changed value,
-    /// called BEFORE commitTx() resets original_value. Only called when present_value
-    /// differs from original_value (i.e., the slot was actually modified this tx).
-    pub fn notifyStorageSlotCommit(self: *Self, address: primitives.Address, slot: primitives.StorageKey, committed_value: primitives.StorageValue) void {
-        if (self.fallback) |fb| if (fb.pre_commit_tx_slot) |f| f(fb.ctx, address, slot, committed_value);
-    }
-
-    /// Notify the fallback that a storage slot was read from a newly-created account.
-    /// The EVM returns 0 for all such reads without consulting the database; this hook
-    /// lets the fallback record the access for EIP-7928 BAL tracking.
-    pub fn notifyStorageRead(self: *Self, address: primitives.Address, slot: primitives.StorageKey) void {
-        if (self.fallback) |fb| if (fb.notify_storage_read) |f| f(fb.ctx, address, slot);
-    }
-
-
     /// Returns true if the address has any non-zero storage entry (O(1)).
     pub fn hasNonZeroStorageForAddress(self: *const Self, address: primitives.Address) bool {
         const count = self.nonzero_storage_count.get(address) orelse return false;
         return count > 0;
-    }
-
-    /// Returns true if the address was committed to the permanent access log in the fallback.
-    /// Used by BaTracker to distinguish legitimately-accessed nonexistent accounts
-    /// from those only loaded for OOG gas calculation.
-    pub fn isTrackedAddress(self: *Self, address: primitives.Address) bool {
-        if (self.fallback) |fb| if (fb.is_tracked_address) |f| return f(fb.ctx, address);
-        return false;
     }
 
     pub fn basicRef(self: Self, address: primitives.Address) !?state.AccountInfo {
