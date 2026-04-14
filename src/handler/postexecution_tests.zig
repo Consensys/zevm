@@ -17,13 +17,13 @@ const ExecuteEvm = mainnet_builder.ExecuteEvm;
 // ---------------------------------------------------------------------------
 
 fn makeEvmParts(db: database.InMemoryDB, spec: primitives.SpecId) struct {
-    ctx: context.Context,
+    ctx: context.DefaultContext,
     instructions: handler_main.Instructions,
     precompiles: handler_main.Precompiles,
     frame_stack: handler_main.FrameStack,
 } {
     return .{
-        .ctx = context.Context.new(db, spec),
+        .ctx = context.DefaultContext.new(db, spec),
         .instructions = handler_main.Instructions.new(spec),
         .precompiles = handler_main.Precompiles.new(spec),
         .frame_stack = handler_main.FrameStack.new(),
@@ -41,7 +41,7 @@ fn insertCaller(db: *database.InMemoryDB, addr: primitives.Address, balance: pri
 }
 
 /// Read an account's current balance from the journal (after execution).
-fn readBalance(ctx: *context.Context, addr: primitives.Address) !primitives.U256 {
+fn readBalance(ctx: *context.DefaultContext, addr: primitives.Address) !primitives.U256 {
     const load = try ctx.journaled_state.loadAccount(addr);
     return load.data.info.balance;
 }

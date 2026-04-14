@@ -61,12 +61,12 @@ test "floor gas: zero for empty calldata on Prague" {
 // -------------------------------------------------------------------------
 
 fn makeEvm(db: database.InMemoryDB, spec: primitives.SpecId) struct {
-    ctx: context.Context,
+    ctx: context.DefaultContext,
     instructions: handler_main.Instructions,
     precompiles: handler_main.Precompiles,
     frame_stack: handler_main.FrameStack,
 } {
-    const ctx = context.Context.new(db, spec);
+    const ctx = context.DefaultContext.new(db, spec);
     return .{
         .ctx = ctx,
         .instructions = handler_main.Instructions.new(spec),

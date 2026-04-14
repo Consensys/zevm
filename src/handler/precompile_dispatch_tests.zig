@@ -35,13 +35,13 @@ const SHA256_ADDR: primitives.Address = blk: {
 };
 
 fn makeEvmParts(db: database.InMemoryDB, spec: primitives.SpecId) struct {
-    ctx: context.Context,
+    ctx: context.DefaultContext,
     instructions: handler_main.Instructions,
     precompiles: handler_main.Precompiles,
     frame_stack: handler_main.FrameStack,
 } {
     return .{
-        .ctx = context.Context.new(db, spec),
+        .ctx = context.DefaultContext.new(db, spec),
         .instructions = handler_main.Instructions.new(spec),
         .precompiles = handler_main.Precompiles.new(spec),
         .frame_stack = handler_main.FrameStack.new(),
@@ -70,10 +70,7 @@ test "precompile dispatch: IDENTITY returns input unchanged" {
     _ = try parts.ctx.journaled_state.loadAccount(CALLER);
     _ = try parts.ctx.journaled_state.loadAccount(IDENTITY_ADDR);
 
-    var host = interpreter_mod.Host{
-        .ctx = &parts.ctx,
-        .precompiles = &parts.precompiles.precompiles,
-    };
+    var host = interpreter_mod.Host.fromCtx(&parts.ctx, &parts.precompiles.precompiles);
 
     const result = host.call(.{
         .caller = CALLER,
@@ -102,10 +99,7 @@ test "precompile dispatch: IDENTITY with no data returns empty" {
     _ = try parts.ctx.journaled_state.loadAccount(CALLER);
     _ = try parts.ctx.journaled_state.loadAccount(IDENTITY_ADDR);
 
-    var host = interpreter_mod.Host{
-        .ctx = &parts.ctx,
-        .precompiles = &parts.precompiles.precompiles,
-    };
+    var host = interpreter_mod.Host.fromCtx(&parts.ctx, &parts.precompiles.precompiles);
 
     const result = host.call(.{
         .caller = CALLER,
@@ -132,10 +126,7 @@ test "precompile dispatch: out-of-gas fails and consumes all gas" {
     _ = try parts.ctx.journaled_state.loadAccount(CALLER);
     _ = try parts.ctx.journaled_state.loadAccount(IDENTITY_ADDR);
 
-    var host = interpreter_mod.Host{
-        .ctx = &parts.ctx,
-        .precompiles = &parts.precompiles.precompiles,
-    };
+    var host = interpreter_mod.Host.fromCtx(&parts.ctx, &parts.precompiles.precompiles);
 
     // IDENTITY needs at least 15 gas; give it less
     const result = host.call(.{
@@ -163,10 +154,7 @@ test "precompile dispatch: null precompiles falls back to interpreter (no precom
     _ = try parts.ctx.journaled_state.loadAccount(CALLER);
     _ = try parts.ctx.journaled_state.loadAccount(IDENTITY_ADDR);
 
-    var host = interpreter_mod.Host{
-        .ctx = &parts.ctx,
-        .precompiles = null, // disabled
-    };
+    var host = interpreter_mod.Host.fromCtx(&parts.ctx, null);
 
     const result = host.call(.{
         .caller = CALLER,

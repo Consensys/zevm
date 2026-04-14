@@ -23,13 +23,13 @@ const CALLEE: primitives.Address = [_]u8{0xBB} ** 20;
 const COINBASE: primitives.Address = [_]u8{0xCB} ** 20;
 
 fn makeParts(db: database.InMemoryDB, spec: primitives.SpecId) struct {
-    ctx: context.Context,
+    ctx: context.DefaultContext,
     instructions: handler_main.Instructions,
     precompiles: handler_main.Precompiles,
     frame_stack: handler_main.FrameStack,
 } {
     return .{
-        .ctx = context.Context.new(db, spec),
+        .ctx = context.DefaultContext.new(db, spec),
         .instructions = handler_main.Instructions.new(spec),
         .precompiles = handler_main.Precompiles.new(spec),
         .frame_stack = handler_main.FrameStack.new(),
@@ -103,10 +103,7 @@ test "SSTORE EIP-2200: fails when gas_remaining <= 2300 (Istanbul+)" {
     _ = try parts.ctx.journaled_state.loadAccount(CALLER);
     _ = try parts.ctx.journaled_state.loadAccount(CALLEE);
 
-    var host = interpreter_mod.Host{
-        .ctx = &parts.ctx,
-        .precompiles = null,
-    };
+    var host = interpreter_mod.Host.fromCtx(&parts.ctx, null);
 
     // Exactly 2300 gas — EIP-2200 guard fires before SSTORE
     const result = host.call(.{
@@ -135,10 +132,7 @@ test "SSTORE EIP-2200: succeeds with sufficient gas" {
     _ = try parts.ctx.journaled_state.loadAccount(CALLER);
     _ = try parts.ctx.journaled_state.loadAccount(CALLEE);
 
-    var host = interpreter_mod.Host{
-        .ctx = &parts.ctx,
-        .precompiles = null,
-    };
+    var host = interpreter_mod.Host.fromCtx(&parts.ctx, null);
 
     // 50,000 gas — plenty for SSTORE set (20000 + SLOAD overhead)
     const result = host.call(.{
@@ -176,10 +170,7 @@ test "gas refund propagation: SSTORE clear in sub-call surfaces in CallResult" {
     // Pre-warm and set slot 0 to non-zero so clearing it earns a refund
     _ = try parts.ctx.journaled_state.sstore(CALLEE, 0, 1);
 
-    var host = interpreter_mod.Host{
-        .ctx = &parts.ctx,
-        .precompiles = null,
-    };
+    var host = interpreter_mod.Host.fromCtx(&parts.ctx, null);
 
     const result = host.call(.{
         .caller = CALLER,

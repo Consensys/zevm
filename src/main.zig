@@ -37,12 +37,13 @@ pub const ONE_ETHER = primitives.ONE_ETHER;
 pub const ONE_GWEI = primitives.ONE_GWEI;
 
 /// Main EVM context builder
-pub fn createMainnetContext(allocator: std.mem.Allocator) !context.Context {
-    return context.Context.init(allocator, .prague);
+pub fn createMainnetContext(allocator: std.mem.Allocator) context.DefaultContext {
+    const db = database.InMemoryDB.init(allocator);
+    return context.DefaultContext.new(db, .prague);
 }
 
 /// Execute a transaction in the EVM
-pub fn executeTransaction(ctx: *context.Context, tx: context.Transaction) !context.ExecutionResult {
+pub fn executeTransaction(ctx: *context.DefaultContext, tx: context.Transaction) !context.ExecutionResult {
     return handler.executeTransaction(ctx, tx);
 }
 

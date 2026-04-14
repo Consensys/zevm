@@ -55,19 +55,21 @@ pub fn opBalance(ctx: *InstructionContext) void {
     const addr_val = stack.peekUnsafe(0);
     const addr = host_module.u256ToAddress(addr_val);
 
-    const info = h.accountInfo(addr) orelse {
-        ctx.interpreter.halt(.invalid_opcode);
-        return;
-    };
-
-    // Post-Berlin: charge dynamic warm/cold cost (static_gas is 0)
+    // Post-Berlin: charge dynamic warm/cold cost BEFORE loading the account.
+    // This prevents loading the account from the database when the opcode runs OOG,
+    // which would incorrectly add the address to the EIP-7928 block access list.
     if (primitives.isEnabledIn(ctx.interpreter.runtime_flags.spec_id, .berlin)) {
-        const dyn_gas: u64 = if (info.is_cold) gas_costs.COLD_ACCOUNT_ACCESS else gas_costs.WARM_ACCOUNT_ACCESS;
+        const dyn_gas: u64 = if (h.isAddressCold(addr)) gas_costs.COLD_ACCOUNT_ACCESS else gas_costs.WARM_ACCOUNT_ACCESS;
         if (!ctx.interpreter.gas.spend(dyn_gas)) {
             ctx.interpreter.halt(.out_of_gas);
             return;
         }
     }
+
+    const info = h.accountInfo(addr) orelse {
+        ctx.interpreter.halt(.invalid_opcode);
+        return;
+    };
 
     stack.setTopUnsafe().* = info.balance;
 }
@@ -110,19 +112,19 @@ pub fn opExtcodesize(ctx: *InstructionContext) void {
     const addr_val = stack.peekUnsafe(0);
     const addr = host_module.u256ToAddress(addr_val);
 
-    const info = h.codeInfo(addr) orelse {
-        stack.setTopUnsafe().* = 0;
-        return;
-    };
-
-    // Post-Berlin: charge dynamic warm/cold cost (static_gas is 0)
+    // Post-Berlin: charge dynamic warm/cold cost BEFORE loading the code.
     if (primitives.isEnabledIn(ctx.interpreter.runtime_flags.spec_id, .berlin)) {
-        const dyn_gas: u64 = if (info.is_cold) gas_costs.COLD_ACCOUNT_ACCESS else gas_costs.WARM_ACCOUNT_ACCESS;
+        const dyn_gas: u64 = if (h.isAddressCold(addr)) gas_costs.COLD_ACCOUNT_ACCESS else gas_costs.WARM_ACCOUNT_ACCESS;
         if (!ctx.interpreter.gas.spend(dyn_gas)) {
             ctx.interpreter.halt(.out_of_gas);
             return;
         }
     }
+
+    const info = h.codeInfo(addr) orelse {
+        stack.setTopUnsafe().* = 0;
+        return;
+    };
 
     // Use originalBytes().len: the analyzed bytecode may include a STOP-padding byte
     // that is NOT part of the on-chain code, so EXTCODESIZE must return the original length.
@@ -150,6 +152,16 @@ pub fn opExtcodecopy(ctx: *InstructionContext) void {
     stack.shrinkUnsafe(4);
 
     const addr = host_module.u256ToAddress(addr_val);
+
+    // Post-Berlin: charge dynamic warm/cold cost BEFORE loading the code.
+    if (primitives.isEnabledIn(ctx.interpreter.runtime_flags.spec_id, .berlin)) {
+        const dyn_gas: u64 = if (h.isAddressCold(addr)) gas_costs.COLD_ACCOUNT_ACCESS else gas_costs.WARM_ACCOUNT_ACCESS;
+        if (!ctx.interpreter.gas.spend(dyn_gas)) {
+            ctx.interpreter.halt(.out_of_gas);
+            return;
+        }
+    }
+
     const info = h.codeInfo(addr) orelse {
         // Address doesn't exist; still need to expand memory and pay copy cost
         if (size == 0) return;
@@ -176,18 +188,10 @@ pub fn opExtcodecopy(ctx: *InstructionContext) void {
         return;
     };
 
-    // Post-Berlin: dynamic warm/cold access cost
-    if (primitives.isEnabledIn(ctx.interpreter.runtime_flags.spec_id, .berlin)) {
-        const dyn_gas: u64 = if (info.is_cold) gas_costs.COLD_ACCOUNT_ACCESS else gas_costs.WARM_ACCOUNT_ACCESS;
-        if (!ctx.interpreter.gas.spend(dyn_gas)) {
-            ctx.interpreter.halt(.out_of_gas);
-            return;
-        }
-    }
-
     if (size == 0) return;
 
     if (mem_off > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
+        h.untrackAddress(addr);
         ctx.interpreter.halt(.memory_limit_oog);
         return;
     }
@@ -195,6 +199,7 @@ pub fn opExtcodecopy(ctx: *InstructionContext) void {
     const mem_off_u: usize = @intCast(mem_off);
     const size_u: usize = @intCast(size);
     const new_size = std.math.add(usize, mem_off_u, size_u) catch {
+        h.untrackAddress(addr);
         ctx.interpreter.halt(.memory_limit_oog);
         return;
     };
@@ -202,11 +207,13 @@ pub fn opExtcodecopy(ctx: *InstructionContext) void {
     // Dynamic: copy cost — use divCeil to avoid (size + 31) overflow when size = maxInt(usize)
     const num_words = std.math.divCeil(usize, size_u, 32) catch unreachable;
     if (!ctx.interpreter.gas.spend(gas_costs.G_COPY * @as(u64, @intCast(num_words)))) {
+        h.untrackAddress(addr);
         ctx.interpreter.halt(.out_of_gas);
         return;
     }
 
     if (!expandMemory(ctx, new_size)) {
+        h.untrackAddress(addr);
         ctx.interpreter.halt(.out_of_gas);
         return;
     }
@@ -246,19 +253,19 @@ pub fn opExtcodehash(ctx: *InstructionContext) void {
     const addr_val = stack.peekUnsafe(0);
     const addr = host_module.u256ToAddress(addr_val);
 
-    const info = h.extCodeHash(addr) orelse {
-        stack.setTopUnsafe().* = 0;
-        return;
-    };
-
-    // Post-Berlin: dynamic warm/cold cost (static_gas is 0)
+    // Post-Berlin: charge dynamic warm/cold cost BEFORE loading the code hash.
     if (primitives.isEnabledIn(ctx.interpreter.runtime_flags.spec_id, .berlin)) {
-        const dyn_gas: u64 = if (info.is_cold) gas_costs.COLD_ACCOUNT_ACCESS else gas_costs.WARM_ACCOUNT_ACCESS;
+        const dyn_gas: u64 = if (h.isAddressCold(addr)) gas_costs.COLD_ACCOUNT_ACCESS else gas_costs.WARM_ACCOUNT_ACCESS;
         if (!ctx.interpreter.gas.spend(dyn_gas)) {
             ctx.interpreter.halt(.out_of_gas);
             return;
         }
     }
+
+    const info = h.extCodeHash(addr) orelse {
+        stack.setTopUnsafe().* = 0;
+        return;
+    };
 
     // Empty account → push 0
     if (info.is_empty) {
@@ -313,19 +320,20 @@ pub fn opSload(ctx: *InstructionContext) void {
     const self_addr = ctx.interpreter.input.target;
     const spec = ctx.interpreter.runtime_flags.spec_id;
 
-    const result = h.sload(self_addr, key) orelse {
-        ctx.interpreter.halt(.invalid_opcode);
-        return;
-    };
-
-    // Dynamic gas for Berlin+ (static_gas is 0 for Berlin+)
+    // Dynamic gas for Berlin+ (static_gas is 0 for Berlin+).
+    // Charge BEFORE loading to avoid a DB read on OOG (EIP-7928 BAL correctness).
     if (primitives.isEnabledIn(spec, .berlin)) {
-        const dyn_gas: u64 = if (result.is_cold) gas_costs.COLD_SLOAD else gas_costs.WARM_SLOAD;
+        const dyn_gas: u64 = if (h.isStorageCold(self_addr, key)) gas_costs.COLD_SLOAD else gas_costs.WARM_SLOAD;
         if (!ctx.interpreter.gas.spend(dyn_gas)) {
             ctx.interpreter.halt(.out_of_gas);
             return;
         }
     }
+
+    const result = h.sload(self_addr, key) orelse {
+        ctx.interpreter.halt(.invalid_opcode);
+        return;
+    };
 
     stack.setTopUnsafe().* = result.value;
 }
@@ -373,7 +381,7 @@ pub fn opSstore(ctx: *InstructionContext) void {
     };
 
     // Compute gas cost using EIP-2200/EIP-2929/EIP-8037 rules
-    const block_gas_limit = h.ctx.block.gas_limit;
+    const block_gas_limit = h.block.gas_limit;
     const sstore_gas = gas_costs.getSstoreCost(spec, result.original, result.current, result.new, result.is_cold, block_gas_limit);
 
     if (!ctx.interpreter.gas.spend(sstore_gas.gas_cost)) {
@@ -625,14 +633,19 @@ pub fn opSelfdestruct(ctx: *InstructionContext) void {
 
     // regular gas before state gas.
     if (!ctx.interpreter.gas.spend(dyn_gas)) {
+        // Untrack the beneficiary: it was loaded for gas calculation but SELFDESTRUCT
+        // never completed (OOG). EIP-7928 BAL should not include it.
+        h.untrackAddress(target);
         ctx.interpreter.halt(.out_of_gas);
         return;
     }
 
     // EIP-8037 (Amsterdam+): charge state gas for new account via SELFDESTRUCT.
     // Draws from reservoir first, spills to gas_left if needed.
+    // NOTE: do NOT untrack target on state-gas OOG — the cold access was already charged
+    // (regular gas passed above), so the target was genuinely accessed and belongs in the BAL.
     if (selfdestruct_charges_new_account and primitives.isEnabledIn(spec, .amsterdam)) {
-        const cpsb = gas_costs.costPerStateByte(h.ctx.block.gas_limit);
+        const cpsb = gas_costs.costPerStateByte(h.block.gas_limit);
         if (!ctx.interpreter.gas.spendStateGas(gas_costs.STATE_BYTES_PER_NEW_ACCOUNT * cpsb)) {
             ctx.interpreter.halt(.out_of_gas);
             return;
