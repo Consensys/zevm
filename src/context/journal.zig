@@ -1165,14 +1165,9 @@ pub const JournalInner = struct {
     pub fn isAddressCold(self: *const JournalInner, address: primitives.Address) bool {
         if (self.evm_state.get(address)) |acct| {
             if (acct.isColdTransactionId(self.transaction_id)) {
-                // EIP-3651: coinbase is pre-warmed each tx. If the coinbase was loaded in
-                // a previous tx (old transaction_id), still treat it as warm for gas purposes.
-                // Only check the coinbase slot — not precompiles or access-list entries, to
-                // avoid unintended cross-tx warm promotion for those.
-                if (self.warm_addresses.coinbase) |cb| {
-                    if (std.mem.eql(u8, &address, &cb)) return false;
-                }
-                return true;
+                // Account was loaded in a prior tx — defer to warm_addresses which covers
+                // EIP-3651 coinbase, precompiles, and EIP-2930 access-list entries.
+                return self.warm_addresses.isCold(address);
             }
             return false;
         }

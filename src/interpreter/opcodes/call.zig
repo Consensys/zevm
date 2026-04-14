@@ -138,7 +138,9 @@ fn callImpl(
     // Worst-case pre-check (assume account non-existent) before any DB load.
     // getCallGasCost(..., false) >= exact cost, so if this passes the account can never
     // become a phantom BAL entry (the exact-cost check below can never OOG).
-    if (primitives.isEnabledIn(spec, .berlin)) {
+    // Gated on Amsterdam: pre-Amsterdam has no BAL and G_NEWACCOUNT makes the worst-case
+    // overly conservative for existing accounts, causing false OOG.
+    if (primitives.isEnabledIn(spec, .amsterdam)) {
         const worst_case = gas_costs.getCallGasCost(spec, pre_is_cold, transfers_value, false);
         if (ctx.interpreter.gas.remaining < worst_case) {
             ctx.interpreter.halt(.out_of_gas);
