@@ -422,10 +422,6 @@ pub fn opCreate(ctx: *InstructionContext) void {
         ctx.interpreter.halt(.invalid_opcode);
         return;
     };
-    if (ctx.interpreter.runtime_flags.is_static) {
-        ctx.interpreter.halt(.invalid_static);
-        return;
-    }
     const stack = &ctx.interpreter.stack;
     if (!stack.hasItems(3)) {
         ctx.interpreter.halt(.stack_underflow);
@@ -438,6 +434,13 @@ pub fn opCreate(ctx: *InstructionContext) void {
     stack.shrinkUnsafe(3);
 
     const spec = ctx.interpreter.runtime_flags.spec_id;
+
+    // Pre-Amsterdam: no state gas, so static check is free and happens before any charges.
+    // Amsterdam+ defers this check until after state gas is charged (see below).
+    if (!primitives.isEnabledIn(spec, .amsterdam) and ctx.interpreter.runtime_flags.is_static) {
+        ctx.interpreter.halt(.invalid_static);
+        return;
+    }
 
     // Base cost: EIP-8037 (Amsterdam+) reduces regular CREATE cost from 32000 to 9000;
     // state gas for new account + code deposit is charged separately in finalizeCreate.
@@ -495,6 +498,13 @@ pub fn opCreate(ctx: *InstructionContext) void {
             ctx.interpreter.halt(.out_of_gas);
             return;
         }
+    }
+
+    // EIP-8037 (Amsterdam+): static check after state gas is charged so the state gas
+    // spill is tracked and returned to the parent's reservoir on frame failure.
+    if (ctx.interpreter.runtime_flags.is_static) {
+        ctx.interpreter.halt(.invalid_static);
+        return;
     }
 
     // EIP-150 (Tangerine Whistle): forward at most 63/64 of remaining gas.
@@ -557,10 +567,6 @@ pub fn opCreate2(ctx: *InstructionContext) void {
         ctx.interpreter.halt(.invalid_opcode);
         return;
     };
-    if (ctx.interpreter.runtime_flags.is_static) {
-        ctx.interpreter.halt(.invalid_static);
-        return;
-    }
     const stack = &ctx.interpreter.stack;
     if (!stack.hasItems(4)) {
         ctx.interpreter.halt(.stack_underflow);
@@ -574,6 +580,13 @@ pub fn opCreate2(ctx: *InstructionContext) void {
     stack.shrinkUnsafe(4);
 
     const spec = ctx.interpreter.runtime_flags.spec_id;
+
+    // Pre-Amsterdam: no state gas, so static check is free and happens before any charges.
+    // Amsterdam+ defers this check until after state gas is charged (see below).
+    if (!primitives.isEnabledIn(spec, .amsterdam) and ctx.interpreter.runtime_flags.is_static) {
+        ctx.interpreter.halt(.invalid_static);
+        return;
+    }
 
     // EIP-8037 (Amsterdam+): same reduced regular cost as CREATE.
     const create2_base_cost: u64 = if (primitives.isEnabledIn(spec, .amsterdam)) 9000 else gas_costs.G_CREATE;
@@ -637,6 +650,13 @@ pub fn opCreate2(ctx: *InstructionContext) void {
             ctx.interpreter.halt(.out_of_gas);
             return;
         }
+    }
+
+    // EIP-8037 (Amsterdam+): static check after state gas is charged so the state gas
+    // spill is tracked and returned to the parent's reservoir on frame failure.
+    if (ctx.interpreter.runtime_flags.is_static) {
+        ctx.interpreter.halt(.invalid_static);
+        return;
     }
 
     // EIP-150 (Tangerine Whistle): forward at most 63/64 of remaining gas.
