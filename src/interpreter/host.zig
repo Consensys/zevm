@@ -606,11 +606,15 @@ fn setupCallCore(js: anytype, host: *Host, inputs: CallInputs, frame_depth: usiz
             if (inputs.value > 0 and inputs.scheme != .delegatecall) {
                 const xfer_err = js.transfer(inputs.caller, inputs.target, inputs.value) catch {
                     js.checkpointRevert(cp);
-                    return .{ .precompile = CallResult.preExecFailure(inputs.gas_limit) };
+                    var r = CallResult.preExecFailure(inputs.gas_limit);
+                    r.state_gas_remaining = inputs.reservoir;
+                    return .{ .precompile = r };
                 };
                 if (xfer_err != null) {
                     js.checkpointRevert(cp);
-                    return .{ .precompile = CallResult.preExecFailure(inputs.gas_limit) };
+                    var r = CallResult.preExecFailure(inputs.gas_limit);
+                    r.state_gas_remaining = inputs.reservoir;
+                    return .{ .precompile = r };
                 }
                 // EIP-7708 (Amsterdam+): emit Transfer log for ETH sent to precompile.
                 if (primitives.isEnabledIn(host.cfg.spec, .amsterdam) and
@@ -631,8 +635,12 @@ fn setupCallCore(js: anytype, host: *Host, inputs: CallInputs, frame_depth: usiz
                     return .{ .precompile = .{ .success = true, .return_data = out.bytes, .gas_used = out.gas_used, .gas_remaining = inputs.gas_limit - out.gas_used, .gas_refunded = 0, .delegation_gas = 0, .state_gas_used = 0, .state_gas_remaining = inputs.reservoir } };
                 },
                 .err => {
+                    // EIP-8037: precompiles never consume state gas. On OOG/failure, the caller's
+                    // reservoir must be restored in full (state_gas_remaining = inputs.reservoir).
                     js.checkpointRevert(cp);
-                    return .{ .precompile = CallResult.failure(inputs.gas_limit) };
+                    var r = CallResult.failure(inputs.gas_limit);
+                    r.state_gas_remaining = inputs.reservoir;
+                    return .{ .precompile = r };
                 },
             }
         }

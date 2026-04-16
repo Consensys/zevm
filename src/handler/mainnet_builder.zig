@@ -328,9 +328,6 @@ pub const MainnetHandler = struct {
                         if (cr.success) {
                             cr.state_gas_used += ir.state_gas_used;
                         }
-                        // On failure: finalizeCreate already set state_gas_remaining = ir.reservoir_remaining
-                        // (the child's remaining reservoir). Do NOT add ir.state_gas_used — state gas that
-                        // spilled from reservoir to regular was already consumed and must not be returned.
                         const cr_status: main.ExecutionStatus = if (cr.success) .Success else if (cr.is_revert) .Revert else .Halt;
                         var exec_result = main.ExecutionResult.new(cr_status, 0);
                         exec_result.state_gas_used = cr.state_gas_used;
@@ -429,7 +426,10 @@ pub const MainnetHandler = struct {
                     tx_regular_exec_gas,
                 );
                 // EIP-8037: initialize root frame reservoir.
-                root_interp.gas.reservoir = tx_reservoir;
+                // EIP-7702 (Amsterdam+): add auth_state_refund back to reservoir — for existing
+                // authorities, set_delegation returns the new-account state gas to the reservoir
+                // so it can be consumed by execution (e.g. SSTORE) or returned as gas_left.
+                root_interp.gas.reservoir = tx_reservoir + (if (primitives.isEnabledIn(spec, .amsterdam)) initial.auth_state_refund else 0);
                 const ir = try executeIterative(root_interp, &host, &return_data_buf);
 
                 if (ir.raw_result.isSuccess()) {
@@ -501,7 +501,7 @@ pub const MainnetHandler = struct {
         // the TOTAL gas consumed (intrinsic + execution), not just execution gas.
         // Per Yellow Paper: g* = gas_limit - gas_remaining_after_exec = total_gas_spent.
         var capped_refund = @min(raw_refund, total_gas_spent / quotient);
-        var final_cost = total_gas_spent - capped_refund - auth_state_refund;
+        var final_cost = total_gas_spent - capped_refund;
 
         if (primitives.isEnabledIn(spec, .prague) and !ctx.cfg.disable_eip7623 and initial_gas.floor_gas > 0) {
             // floor_total = TX_BASE_COST + floor_exec_gas (validated: gas_limit >= floor_total)
@@ -509,25 +509,6 @@ pub const MainnetHandler = struct {
             if (final_cost < floor_total) {
                 final_cost = floor_total;
                 capped_refund = 0;
-            }
-        }
-
-        // EIP-8037 (Amsterdam+): for failed txs, receipt gas = min(regular_spent, TX_MAX) + initial_state_gas.
-        // This caps the sender's fee on failed large txs at TX_MAX regular + state intrinsic.
-        if (is_amsterdam and result.result.status != .Success) {
-            capped_refund = 0;
-            const regular_spent = total_gas_spent -| initial_gas.initial_state_gas;
-            const net_state = if (initial_gas.initial_state_gas > auth_state_refund)
-                initial_gas.initial_state_gas - auth_state_refund
-            else
-                0;
-            final_cost = @min(regular_spent, interpreter_mod.gas_costs.TX_MAX_GAS_LIMIT) + net_state;
-            // EIP-7623 floor still applies to failed/reverted txs.
-            if (!ctx.cfg.disable_eip7623 and initial_gas.floor_gas > 0) {
-                const floor_total = 21000 + initial_gas.floor_gas;
-                if (final_cost < floor_total) {
-                    final_cost = floor_total;
-                }
             }
         }
 
