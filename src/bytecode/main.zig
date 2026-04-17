@@ -565,38 +565,38 @@ pub const Bytecode = union(enum) {
     }
 
     /// Returns a reference to the bytecode.
-    pub fn bytecode(self: Self) []const u8 {
-        return switch (self) {
-            .legacy_analyzed => |analyzed| analyzed.getBytecode(),
-            .eip7702 => |code| code.raw(),
+    pub fn bytecode(self: *const Self) []const u8 {
+        return switch (self.*) {
+            .legacy_analyzed => |*analyzed| analyzed.getBytecode(),
+            .eip7702 => |*code| code.raw(),
         };
     }
 
     /// Returns raw bytes slice.
-    pub fn bytesSlice(self: Self) []const u8 {
+    pub fn bytesSlice(self: *const Self) []const u8 {
         return self.bytecode();
     }
 
     /// Returns the original bytecode.
-    pub fn originalBytes(self: Self) []const u8 {
-        return switch (self) {
-            .legacy_analyzed => |analyzed| analyzed.originalBytes(),
-            .eip7702 => |eip7702| eip7702.raw(),
+    pub fn originalBytes(self: *const Self) []const u8 {
+        return switch (self.*) {
+            .legacy_analyzed => |*analyzed| analyzed.originalBytes(),
+            .eip7702 => |*eip7702| eip7702.raw(),
         };
     }
 
     /// Returns the original bytecode as a byte slice.
-    pub fn originalByteSlice(self: Self) []const u8 {
+    pub fn originalByteSlice(self: *const Self) []const u8 {
         return self.originalBytes();
     }
 
     /// Returns the length of the original bytes.
-    pub fn len(self: Self) usize {
+    pub fn len(self: *const Self) usize {
         return self.originalByteSlice().len;
     }
 
     /// Returns whether the bytecode is empty.
-    pub fn isEmpty(self: Self) bool {
+    pub fn isEmpty(self: *const Self) bool {
         return self.len() == 0;
     }
 
@@ -695,7 +695,7 @@ pub const Eip7702Bytecode = struct {
         };
     }
 
-    pub fn raw(self: Self) []const u8 {
+    pub fn raw(self: *const Self) []const u8 {
         return &self.raw_bytes;
     }
 };
