@@ -737,9 +737,14 @@ fn executeIterative(
                 .call => |pc| {
                     var r = host.finalizeCall(pc.checkpoint, sub_result, pc.inputs.gas_limit, sub_gas_rem, sub_gas_ref, return_data_buf.items);
                     // EIP-8037: on success, propagate child's state gas and remaining reservoir.
-                    // On failure, restore ALL child state gas + reservoir to parent's reservoir.
+                    // On any failure, state is rolled back so state gas returns to parent reservoir.
+                    // Exception: invalid_static — CREATE charges state gas before the static check
+                    // fires, so that state gas is forfeited even though no account was created.
                     if (r.success) {
                         r.state_gas_used = sub_state_gas;
+                        r.state_gas_remaining = sub_reservoir;
+                    } else if (sub_result == .invalid_static) {
+                        r.state_gas_used = 0;
                         r.state_gas_remaining = sub_reservoir;
                     } else {
                         r.state_gas_used = 0;
