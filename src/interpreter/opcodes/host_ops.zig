@@ -591,16 +591,12 @@ pub fn opSelfdestruct(ctx: *InstructionContext) void {
     const self_addr = ctx.interpreter.input.target;
     const spec = ctx.interpreter.runtime_flags.spec_id;
 
-    // Worst-case pre-check before loading the target account.
-    // Assumes cold access (if warm, actual cost is lower) and new account with value (worst case
-    // for G_NEWACCOUNT). If this passes, the exact dyn_gas is <= max_dyn_gas so gas.spend() below
-    // always succeeds and the target is never a phantom BAL entry.
+    // Pre-check: only guard against the cold-access cost before loading the target.
+    // G_NEWACCOUNT depends on target_exists (only known after loading), so we check it
+    // inline after calling selfdestruct() with an explicit OOG return.
     const pre_is_cold = h.isAddressCold(target);
-    var max_dyn_gas: u64 = if (primitives.isEnabledIn(spec, .berlin) and pre_is_cold) gas_costs.COLD_ACCOUNT_ACCESS else 0;
-    if (primitives.isEnabledIn(spec, .tangerine) and !primitives.isEnabledIn(spec, .amsterdam)) {
-        max_dyn_gas += 25000; // worst-case G_NEWACCOUNT (Amsterdam replaces with state gas)
-    }
-    if (ctx.interpreter.gas.remaining < max_dyn_gas) {
+    const cold_guard: u64 = if (primitives.isEnabledIn(spec, .berlin) and pre_is_cold) gas_costs.COLD_ACCOUNT_ACCESS else 0;
+    if (ctx.interpreter.gas.remaining < cold_guard) {
         ctx.interpreter.halt(.out_of_gas);
         return;
     }
@@ -631,8 +627,10 @@ pub fn opSelfdestruct(ctx: *InstructionContext) void {
         dyn_gas += 25000;
     }
 
-    // dyn_gas <= max_dyn_gas (pre-check passed) — spend always succeeds.
-    _ = ctx.interpreter.gas.spend(dyn_gas);
+    if (!ctx.interpreter.gas.spend(dyn_gas)) {
+        ctx.interpreter.halt(.out_of_gas);
+        return;
+    }
 
     // EIP-8037 (Amsterdam+): charge state gas for new account via SELFDESTRUCT.
     // Draws from reservoir first, spills to gas_left if needed.
