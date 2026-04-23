@@ -328,9 +328,6 @@ pub const MainnetHandler = struct {
                         if (cr.success) {
                             cr.state_gas_used += ir.state_gas_used;
                         }
-                        // On failure: finalizeCreate already set state_gas_remaining = ir.reservoir_remaining
-                        // (the child's remaining reservoir). Do NOT add ir.state_gas_used — state gas that
-                        // spilled from reservoir to regular was already consumed and must not be returned.
                         const cr_status: main.ExecutionStatus = if (cr.success) .Success else if (cr.is_revert) .Revert else .Halt;
                         var exec_result = main.ExecutionResult.new(cr_status, 0);
                         exec_result.state_gas_used = cr.state_gas_used;
@@ -358,15 +355,12 @@ pub const MainnetHandler = struct {
 
                 // Take checkpoint for top-level CALL: state is reverted through this on failure.
                 const call_checkpoint = ctx.journaled_state.getCheckpoint();
-                // Notify db fallback that a new frame has opened (checkpoint-aware tracking).
-                ctx.journaled_state.snapshotFrame();
 
                 // Value transfer for top-level CALL.
                 if (tx.value > 0) {
                     const xfer_err = try ctx.journaled_state.transfer(tx.caller, target, tx.value);
                     if (xfer_err != null) {
                         ctx.journaled_state.checkpointRevert(call_checkpoint);
-                        ctx.journaled_state.revertFrame();
                         return main.FrameResult.new(
                             main.ExecutionResult.new(.Fail, exec_gas),
                             0,
@@ -388,7 +382,6 @@ pub const MainnetHandler = struct {
                         .success => |out| {
                             if (out.reverted) {
                                 ctx.journaled_state.checkpointRevert(call_checkpoint);
-                                ctx.journaled_state.revertFrame();
                                 return main.FrameResult.new(
                                     main.ExecutionResult.new(.Revert, exec_gas),
                                     0,
@@ -396,7 +389,6 @@ pub const MainnetHandler = struct {
                                 );
                             }
                             ctx.journaled_state.checkpointCommit();
-                            ctx.journaled_state.commitFrame();
                             var fr = main.FrameResult.new(
                                 main.ExecutionResult.new(.Success, out.gas_used),
                                 tx_regular_exec_gas - out.gas_used,
@@ -407,7 +399,6 @@ pub const MainnetHandler = struct {
                         },
                         .err => {
                             ctx.journaled_state.checkpointRevert(call_checkpoint);
-                            ctx.journaled_state.revertFrame();
                             return main.FrameResult.new(
                                 main.ExecutionResult.new(.Fail, exec_gas),
                                 0,
@@ -435,15 +426,16 @@ pub const MainnetHandler = struct {
                     tx_regular_exec_gas,
                 );
                 // EIP-8037: initialize root frame reservoir.
-                root_interp.gas.reservoir = tx_reservoir;
+                // EIP-7702 (Amsterdam+): add auth_state_refund back to reservoir — for existing
+                // authorities, set_delegation returns the new-account state gas to the reservoir
+                // so it can be consumed by execution (e.g. SSTORE) or returned as gas_left.
+                root_interp.gas.reservoir = tx_reservoir + (if (primitives.isEnabledIn(spec, .amsterdam)) initial.auth_state_refund else 0);
                 const ir = try executeIterative(root_interp, &host, &return_data_buf);
 
                 if (ir.raw_result.isSuccess()) {
                     ctx.journaled_state.checkpointCommit();
-                    ctx.journaled_state.commitFrame();
                 } else {
                     ctx.journaled_state.checkpointRevert(call_checkpoint);
-                    ctx.journaled_state.revertFrame();
                 }
 
                 const status: main.ExecutionStatus = switch (ir.raw_result) {
@@ -509,7 +501,7 @@ pub const MainnetHandler = struct {
         // the TOTAL gas consumed (intrinsic + execution), not just execution gas.
         // Per Yellow Paper: g* = gas_limit - gas_remaining_after_exec = total_gas_spent.
         var capped_refund = @min(raw_refund, total_gas_spent / quotient);
-        var final_cost = total_gas_spent - capped_refund - auth_state_refund;
+        var final_cost = total_gas_spent - capped_refund;
 
         if (primitives.isEnabledIn(spec, .prague) and !ctx.cfg.disable_eip7623 and initial_gas.floor_gas > 0) {
             // floor_total = TX_BASE_COST + floor_exec_gas (validated: gas_limit >= floor_total)
@@ -517,25 +509,6 @@ pub const MainnetHandler = struct {
             if (final_cost < floor_total) {
                 final_cost = floor_total;
                 capped_refund = 0;
-            }
-        }
-
-        // EIP-8037 (Amsterdam+): for failed txs, receipt gas = min(regular_spent, TX_MAX) + initial_state_gas.
-        // This caps the sender's fee on failed large txs at TX_MAX regular + state intrinsic.
-        if (is_amsterdam and result.result.status != .Success) {
-            capped_refund = 0;
-            const regular_spent = total_gas_spent -| initial_gas.initial_state_gas;
-            const net_state = if (initial_gas.initial_state_gas > auth_state_refund)
-                initial_gas.initial_state_gas - auth_state_refund
-            else
-                0;
-            final_cost = @min(regular_spent, interpreter_mod.gas_costs.TX_MAX_GAS_LIMIT) + net_state;
-            // EIP-7623 floor still applies to failed/reverted txs.
-            if (!ctx.cfg.disable_eip7623 and initial_gas.floor_gas > 0) {
-                const floor_total = 21000 + initial_gas.floor_gas;
-                if (final_cost < floor_total) {
-                    final_cost = floor_total;
-                }
             }
         }
 
@@ -571,30 +544,9 @@ pub const MainnetHandler = struct {
             result.result.logs = js.takeLogs();
         }
 
-        // 7. Commit transaction state
-        // Before committing, notify the fallback about storage slots being committed
-        // with a changed value. This lets WitnessDatabase track cross-tx intermediate
-        // writes for EIP-7928 BAL validation (storageChanges vs storageReads).
-        // Must be done BEFORE commitTx() resets original_value = present_value.
-        {
-            var state_it = js.inner.evm_state.iterator();
-            while (state_it.next()) |entry| {
-                // Skip accounts that were both created AND selfdestructed in the same tx:
-                // their storage writes have zero net effect and should not be recorded as
-                // committed changes for EIP-7928 BAL (they become storageReads, not storageChanges).
-                if (entry.value_ptr.status.created and entry.value_ptr.status.self_destructed) continue;
-                var slot_it = entry.value_ptr.storage.iterator();
-                while (slot_it.next()) |slot| {
-                    if (slot.value_ptr.present_value != slot.value_ptr.original_value) {
-                        js.notifyStorageSlotCommit(entry.key_ptr.*, slot.key_ptr.*, slot.value_ptr.present_value);
-                    }
-                }
-            }
-        }
+        // 7. Commit transaction state.
+        // commitTx() records committed-changed storage and flushes per-tx BAL tracking internally.
         js.commitTx();
-        // Notify fallback database that this transaction committed.
-        // WitnessDatabase uses this to flush per-tx pending tracking to the permanent access log.
-        js.commitTracking();
 
         // 8. Update ExecutionResult with final accounting.
         // EIP-7778 (Amsterdam+): block gas does NOT deduct refunds.
@@ -630,10 +582,8 @@ pub const MainnetHandler = struct {
     /// Handle errors — revert journal, discard tx.
     pub fn catchError(evm: anytype, _: anyerror) void {
         const ctx = evm.getContext();
-        // Revert all state changes from this transaction
+        // Revert all state changes from this transaction (also clears per-tx BAL pending).
         ctx.journaled_state.discardTx();
-        // Notify fallback database that this transaction was discarded.
-        ctx.journaled_state.discardTracking();
     }
 };
 
@@ -787,9 +737,14 @@ fn executeIterative(
                 .call => |pc| {
                     var r = host.finalizeCall(pc.checkpoint, sub_result, pc.inputs.gas_limit, sub_gas_rem, sub_gas_ref, return_data_buf.items);
                     // EIP-8037: on success, propagate child's state gas and remaining reservoir.
-                    // On failure, restore ALL child state gas + reservoir to parent's reservoir.
+                    // On any failure, state is rolled back so state gas returns to parent reservoir.
+                    // Exception: invalid_static — CREATE charges state gas before the static check
+                    // fires, so that state gas is forfeited even though no account was created.
                     if (r.success) {
                         r.state_gas_used = sub_state_gas;
+                        r.state_gas_remaining = sub_reservoir;
+                    } else if (sub_result == .invalid_static) {
+                        r.state_gas_used = 0;
                         r.state_gas_remaining = sub_reservoir;
                     } else {
                         r.state_gas_used = 0;

@@ -132,13 +132,17 @@ fn callImpl(
         }
     }
 
-    // Pre-check: if Berlin+, ensure there's enough gas for the access cost before loading
-    // the callee. This avoids a DB read when the CALL itself runs OOG before the callee
-    // is accessed, which would incorrectly add the callee to the EIP-7928 BAL.
     const pre_is_cold = h.isAddressCold(target_addr);
-    if (primitives.isEnabledIn(spec, .berlin)) {
-        const access_cost: u64 = if (pre_is_cold) gas_costs.COLD_ACCOUNT_ACCESS else gas_costs.WARM_ACCOUNT_ACCESS;
-        if (ctx.interpreter.gas.remaining < access_cost) {
+    // transfers_value only depends on the stack value — no account load needed.
+    const transfers_value = has_value and value > 0;
+    // Worst-case pre-check (assume account non-existent) before any DB load.
+    // getCallGasCost(..., false) >= exact cost, so if this passes the account can never
+    // become a phantom BAL entry (the exact-cost check below can never OOG).
+    // Gated on Amsterdam: pre-Amsterdam has no BAL and G_NEWACCOUNT makes the worst-case
+    // overly conservative for existing accounts, causing false OOG.
+    if (primitives.isEnabledIn(spec, .amsterdam)) {
+        const worst_case = gas_costs.getCallGasCost(spec, pre_is_cold, transfers_value, false);
+        if (ctx.interpreter.gas.remaining < worst_case) {
             ctx.interpreter.halt(.out_of_gas);
             return;
         }
@@ -147,7 +151,6 @@ fn callImpl(
     // Load target account info to determine warm/cold access and whether the account exists.
     const acct_info = h.accountInfo(target_addr);
     const is_cold = if (acct_info) |info| info.is_cold else pre_is_cold;
-    const transfers_value = has_value and value > 0;
     // G_NEWACCOUNT applies to the ETH *recipient*, not the code source.
     // For CALLCODE/DELEGATECALL, ETH goes to self (always exists). Otherwise ETH goes to target_addr.
     const account_exists = switch (scheme) {
@@ -175,14 +178,8 @@ fn callImpl(
     const base_cost = call_cost_no_delegation + delegation_gas;
 
     // Determine forwarded gas (EIP-150 introduces 63/64 rule; pre-EIP-150 uses all remaining).
+    // worst_case >= call_cost_no_delegation, so the pre-check above guarantees remaining >= it.
     const remaining = ctx.interpreter.gas.remaining;
-    if (remaining < call_cost_no_delegation) {
-        // OOG before the target was "accessed" in EIP-7928 terms (can't pay transfer/new-account).
-        // Per EELS: target is not yet in accessed_addresses at this point → untrack it.
-        h.untrackAddress(target_addr);
-        ctx.interpreter.halt(.out_of_gas);
-        return;
-    }
     if (remaining < base_cost) {
         // OOG after target access but before delegation (oog_after_target_access /
         // oog_success_minus_1). Per EELS second check_gas: target IS in BAL, delegation NOT loaded.
@@ -425,10 +422,6 @@ pub fn opCreate(ctx: *InstructionContext) void {
         ctx.interpreter.halt(.invalid_opcode);
         return;
     };
-    if (ctx.interpreter.runtime_flags.is_static) {
-        ctx.interpreter.halt(.invalid_static);
-        return;
-    }
     const stack = &ctx.interpreter.stack;
     if (!stack.hasItems(3)) {
         ctx.interpreter.halt(.stack_underflow);
@@ -441,6 +434,13 @@ pub fn opCreate(ctx: *InstructionContext) void {
     stack.shrinkUnsafe(3);
 
     const spec = ctx.interpreter.runtime_flags.spec_id;
+
+    // Pre-Amsterdam: no state gas, so static check is free and happens before any charges.
+    // Amsterdam+ defers this check until after state gas is charged (see below).
+    if (!primitives.isEnabledIn(spec, .amsterdam) and ctx.interpreter.runtime_flags.is_static) {
+        ctx.interpreter.halt(.invalid_static);
+        return;
+    }
 
     // Base cost: EIP-8037 (Amsterdam+) reduces regular CREATE cost from 32000 to 9000;
     // state gas for new account + code deposit is charged separately in finalizeCreate.
@@ -498,6 +498,13 @@ pub fn opCreate(ctx: *InstructionContext) void {
             ctx.interpreter.halt(.out_of_gas);
             return;
         }
+    }
+
+    // EIP-8037 (Amsterdam+): static check after state gas is charged so the state gas
+    // spill is tracked and returned to the parent's reservoir on frame failure.
+    if (ctx.interpreter.runtime_flags.is_static) {
+        ctx.interpreter.halt(.invalid_static);
+        return;
     }
 
     // EIP-150 (Tangerine Whistle): forward at most 63/64 of remaining gas.
@@ -560,10 +567,6 @@ pub fn opCreate2(ctx: *InstructionContext) void {
         ctx.interpreter.halt(.invalid_opcode);
         return;
     };
-    if (ctx.interpreter.runtime_flags.is_static) {
-        ctx.interpreter.halt(.invalid_static);
-        return;
-    }
     const stack = &ctx.interpreter.stack;
     if (!stack.hasItems(4)) {
         ctx.interpreter.halt(.stack_underflow);
@@ -577,6 +580,13 @@ pub fn opCreate2(ctx: *InstructionContext) void {
     stack.shrinkUnsafe(4);
 
     const spec = ctx.interpreter.runtime_flags.spec_id;
+
+    // Pre-Amsterdam: no state gas, so static check is free and happens before any charges.
+    // Amsterdam+ defers this check until after state gas is charged (see below).
+    if (!primitives.isEnabledIn(spec, .amsterdam) and ctx.interpreter.runtime_flags.is_static) {
+        ctx.interpreter.halt(.invalid_static);
+        return;
+    }
 
     // EIP-8037 (Amsterdam+): same reduced regular cost as CREATE.
     const create2_base_cost: u64 = if (primitives.isEnabledIn(spec, .amsterdam)) 9000 else gas_costs.G_CREATE;
@@ -640,6 +650,13 @@ pub fn opCreate2(ctx: *InstructionContext) void {
             ctx.interpreter.halt(.out_of_gas);
             return;
         }
+    }
+
+    // EIP-8037 (Amsterdam+): static check after state gas is charged so the state gas
+    // spill is tracked and returned to the parent's reservoir on frame failure.
+    if (ctx.interpreter.runtime_flags.is_static) {
+        ctx.interpreter.halt(.invalid_static);
+        return;
     }
 
     // EIP-150 (Tangerine Whistle): forward at most 63/64 of remaining gas.
